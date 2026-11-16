@@ -182,6 +182,8 @@ e trava o limite no target autorizado — o que efetivamente existe num CTF.
   `scripts/sync-knowledge.py` + `knowledge.lock`. Atualização só manual.
 - `Knowledge Service`: `knowledge_search(query, category)` (FTS5 sobre Arsenal +
   índice de skills), `skill_get(category)`, `tool_manual(name)`.
+- **Nesta fase: serviço + REST** (`/api/knowledge/rebuild`, `/search`, `/skills`) — UI de
+  busca e MCP exposure ficam para fases posteriores (MCP pertence ao subsistema 5).
 - Skills são injetadas no prompt pelo próprio framework (host dos agentes), não por
   nenhum host externo.
 - Wordlists/payloads entram no mesmo mecanismo de vendoring: `PayloadsAllTheThings`
