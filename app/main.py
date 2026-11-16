@@ -1,0 +1,32 @@
+from pathlib import Path
+
+from fastapi import FastAPI
+
+from .database import default_engine, get_session
+
+
+def create_app(engine=None, storage_dir: Path | None = None) -> FastAPI:
+    app = FastAPI(title="CTF Orchestrator")
+
+    if engine is not None or storage_dir is not None:
+        import sqlmodel
+
+        test_engine = engine or default_engine()
+        sqlmodel.SQLModel.metadata.create_all(test_engine)
+
+        def session_override():
+            from sqlmodel import Session
+
+            with Session(test_engine) as session:
+                yield session
+
+        app.dependency_overrides[get_session] = session_override
+
+    @app.get("/api/health")
+    def health():
+        return {"status": "ok"}
+
+    return app
+
+
+app = create_app()
