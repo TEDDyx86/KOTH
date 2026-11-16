@@ -23,7 +23,9 @@ lerem/escreverem o tracking, mas nunca como núcleo.
    interna apenas** (sem execução manual pela UI; a UI de run manual fica para fase posterior).
    Inventário da máquina (2026-11-16): presentes nmap, ncat, curl, strings, gdb, objdump, sqlmap,
    python; wsl disponível (distro docker-desktop). Ver plan `docs/plans/2026-11-16-tool-runner.md`.
-4. Knowledge subsystem — vendoring de ctf-skills e Dispatch (skills + Arsenal + manuals)
+4. Knowledge subsystem — vendoring de ctf-skills e Dispatch (skills + Arsenal + manuals).
+   **Implementado** (ver plan `docs/plans/2026-11-16-knowledge.md`): vendoring content-only com
+   `knowledge.lock`, parser de frontmatter, índice FTS5, REST (`/api/knowledge/*`) e CLI de busca.
 5. Agent Runtime — pydantic-ai, triage → Arsenal lookup → checkpoint → solver
 
 Nota: 3–5 dependem do modelo de dados do núcleo. O runtime de agentes (5) usa o executor
