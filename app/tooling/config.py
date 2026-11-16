@@ -11,6 +11,7 @@ DEFAULT_PATH = BASE_DIR / "config" / "tools.yaml"
 @dataclass
 class ToolSpec:
     mode: str = "native"
+    guard: str = "strict"  # strict = host/metachar guards; none = free args (code runners)
 
 
 @dataclass
@@ -31,7 +32,8 @@ def load_tools_config(path: Path | None = None) -> ToolSettings:
         raw = yaml.safe_load(fh) or {}
     settings = ToolSettings()
     for name, spec in (raw.get("tools") or {}).items():
-        settings.tools[str(name)] = ToolSpec(mode=(spec or {}).get("mode", "native"))
+        settings.tools[str(name)] = ToolSpec(mode=(spec or {}).get("mode", "native"),
+                                             guard=(spec or {}).get("guard", "strict"))
     d = raw.get("defaults") or {}
     settings.defaults = Defaults(timeout_s=int(d.get("timeout_s", 300)),
                                  output_limit_mb=int(d.get("output_limit_mb", 10)))

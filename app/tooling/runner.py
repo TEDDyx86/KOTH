@@ -54,9 +54,14 @@ class ToolRunner:
         return path
 
     def build_argv(self, tool: str, args: list[str]) -> list[str]:
-        return [self.resolve_executable(tool), *self.validate_args(None, list(args))]
+        spec = self.settings.tools.get(tool)
+        guard = spec.guard if spec else "strict"
+        return [self.resolve_executable(tool), *self.validate_args(None, list(args), guard=guard)]
 
-    def validate_args(self, challenge_target: str | None, args: list[str]) -> list[str]:
+    def validate_args(self, challenge_target: str | None, args: list[str],
+                      guard: str = "strict") -> list[str]:
+        if guard == "none":
+            return args
         for arg in args:
             if any(ch in METACHARS for ch in arg):
                 raise UnsafeArg(f"shell metacharacter in arg: {arg!r}")
@@ -75,7 +80,8 @@ class ToolRunner:
         limit_mb = output_limit_mb if output_limit_mb is not None else self.settings.defaults.output_limit_mb
         challenge_target = challenge.target
         executable = self.resolve_executable(tool)
-        tail = self.validate_args(challenge_target, list(args))
+        spec = self.settings.tools[tool]
+        tail = self.validate_args(challenge_target, list(args), guard=spec.guard)
         argv = [executable, *tail]
 
         workdir = self.storage.storage_dir / "sandbox" / str(challenge.event_id) / str(challenge.id)
@@ -95,10 +101,11 @@ class ToolRunner:
             returncode = None
 
         limit_bytes = max(limit_mb, 0) * 1024 * 1024
+        if limit_bytes <= 0:
+            limit_bytes = 1024  # <=0 MB is never "unlimited" — 1KB guard instead
         truncated = False
-        if limit_bytes and len(stdout) + len(stderr) > limit_bytes:
-            keep = max(limit_bytes, 1024)
-            stdout, stderr, truncated = stdout[:keep], b"", True
+        if len(stdout) + len(stderr) > limit_bytes:
+            stdout, stderr, truncated = stdout[:limit_bytes], b"", True
 
         return ToolRunResult(tool=tool, argv=argv, returncode=returncode,
                              stdout=stdout.decode("utf-8", "replace"),

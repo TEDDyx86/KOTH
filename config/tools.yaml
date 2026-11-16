@@ -2,11 +2,11 @@ defaults:
   timeout_s: 300
   output_limit_mb: 10
 tools:
-  nmap:    {mode: native}
-  ncat:    {mode: native}
-  curl:    {mode: native}
-  strings: {mode: native}
-  gdb:     {mode: native}
-  objdump: {mode: native}
-  sqlmap:  {mode: native}
-  python:  {mode: native}
+  nmap:    {mode: native, guard: strict}
+  ncat:    {mode: native, guard: strict}
+  curl:    {mode: native, guard: strict}
+  strings: {mode: native, guard: strict}
+  gdb:     {mode: native, guard: strict}
+  objdump: {mode: native, guard: strict}
+  sqlmap:  {mode: native, guard: strict}
+  python:  {mode: native, guard: none}
