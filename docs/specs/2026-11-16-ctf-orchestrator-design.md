@@ -96,6 +96,21 @@ Regras:
    tools de recon rodam livres durante um solver já aprovado.
 6. Windows: `CREATE_NO_WINDOW`, paths saneados, modo `wsl` por tool quando necessário.
 
+### Tool Doctor (inventário de ferramentas)
+
+O agente falha quando uma tool está ausente no meio de uma competição — o inventário
+evita isso antes:
+
+- `GET /api/tools/inventory` → `[{name, path, version, mode: native|wsl|missing, categories}]`
+- Roda na inicialização e sob demanda; aba Configurações exibe semáforo
+  (vermelho = missing), para ver o que falta antes do evento, não durante
+- O Agent Runtime consulta o inventário antes de montar o plano do solver: se a
+  tool-chave da categoria está missing, o triage avisa ("instale X / configure WSL")
+  em vez de falhar no meio
+- Seed de allowlist por categoria vem dos repositórios vendored (o `install_ctf_tools.sh`
+  do ctf-skills e os 15 toolsets do Dispatch servem de referência do que cada
+  categoria usa); a allowlist cresce por config, nunca por código
+
 ## 7. Agent & Persona Registry
 
 Um "agent" = persona + papel + modelo + tools. Nada hardcoded.
@@ -165,6 +180,9 @@ e trava o limite no target autorizado — o que efetivamente existe num CTF.
   índice de skills), `skill_get(category)`, `tool_manual(name)`.
 - Skills são injetadas no prompt pelo próprio framework (host dos agentes), não por
   nenhum host externo.
+- Wordlists/payloads entram no mesmo mecanismo de vendoring: `PayloadsAllTheThings`
+  (shallow clone, previsto no ctf-skills) e `SecLists`, fixados em `knowledge.lock`
+  e expostos pelo Knowledge Service (`wordlist_get(name)` / caminhos para o ToolRunner).
 - O checkpoint humano do Dispatch (triage → recomendação → aprovar/rejeitar/ajustar →
   só então solver roda) é regra do framework, implementada no loop do Agent Runtime.
 
