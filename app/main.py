@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from .database import default_engine, get_session
 
@@ -36,6 +37,12 @@ def create_app(engine=None, storage_dir: Path | None = None) -> FastAPI:
 
     app.include_router(events_module.router, prefix="/api/events", tags=["events"])
     app.include_router(challenges_module.router, prefix="/api", tags=["challenges"])
+
+    static_dir = Path(__file__).resolve().parent / "static"
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    from .web import routes as web_routes
+    app.include_router(web_routes.router)
 
     return app
 

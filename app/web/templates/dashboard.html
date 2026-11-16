@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — CTF Orchestrator{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<section class="card">
+  <h2>Eventos</h2>
+  {% for event, solved, total in events %}
+    <div>
+      <a href="/events/{{ event.id }}">{{ event.name }}</a>
+      <span class="badge">{{ event.status.value }}</span>
+      <div class="meter" style="max-width: 320px;">
+        <span style="width: {{ (100 * solved / total) if total else 0 }}%;"></span>
+      </div>
+      <small style="color: var(--muted);">{{ solved }}/{{ total }} resolvidos</small>
+    </div>
+  {% else %}
+    <p style="color: var(--muted);">Nenhum evento. Crie via API ou form abaixo.</p>
+  {% endfor %}
+  <form method="post" action="/events" style="display:flex; gap:0.5rem; max-width:480px; margin-top:1rem;">
+    <input name="name" placeholder="Nome do CTF" required>
+    <button class="btn" type="submit">Criar evento</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Challenges abertos</h2>
+  <table class="list">
+    <tr><th>Título</th><th>Categoria</th><th>Pontos</th><th>Status</th></tr>
+    {% for c in open_challenges %}
+      <tr>
+        <td><a href="/challenges/{{ c.id }}">{{ c.title }}</a></td>
+        <td>{{ c.category }}</td>
+        <td>{{ c.points }}</td>
+        <td><span class="badge">{{ c.status.value }}</span></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" style="color: var(--muted);">Nada aberto.</td></tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section class="card">
+  <h2>Atividade recente</h2>
+  <ul>
+    {% for a in recent_attempts %}
+      <li class="mono" style="font-size: 0.85rem;">
+        [{{ a.timestamp.strftime("%H:%M") }}] {{ a.type.value }} — {{ a.description }} → {{ a.result.value }}
+      </li>
+    {% else %}
+      <li style="color: var(--muted);">Sem tentativas ainda.</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}
