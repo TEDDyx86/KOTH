@@ -1,0 +1,24 @@
+{
+  "name": "ctf-dispatch",
+  "displayName": "CTF Dispatch",
+  "version": "1.0.3",
+  "description": "Triage-first CTF solving: a dispatcher that classifies a challenge, retrieves a matching method from a bundled Arsenal, and stops at a human checkpoint before any category solver runs.",
+  "author": {
+    "name": "Felipe Castro"
+  },
+  "homepage": "https://github.com/Felipebc2/Dispatch",
+  "repository": "https://github.com/Felipebc2/Dispatch",
+  "documentationUrl": "https://github.com/Felipebc2/Dispatch#readme",
+  "supportUrl": "https://github.com/Felipebc2/Dispatch/issues",
+  "privacyPolicyUrl": "https://github.com/Felipebc2/Dispatch#security--privacy",
+  "license": "MIT",
+  "keywords": ["ctf", "security", "pentest", "reversing", "crypto", "dfir", "web-security"],
+  "userConfig": {
+    "flag_format": {
+      "type": "string",
+      "title": "Flag format",
+      "description": "The flag pattern used by your CTF, e.g. flag{...}, HTB{...} or CTF{...}. Solvers validate found flags against it. Override at runtime with /ctf-dispatch:setflag.",
+      "default": "flag{...}"
+    }
+  }
+}
