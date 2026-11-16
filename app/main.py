@@ -34,9 +34,11 @@ def create_app(engine=None, storage_dir: Path | None = None) -> FastAPI:
 
     from .api import challenges as challenges_module
     from .api import events as events_module
+    from .api import knowledge as knowledge_module
 
     app.include_router(events_module.router, prefix="/api/events", tags=["events"])
     app.include_router(challenges_module.router, prefix="/api", tags=["challenges"])
+    app.include_router(knowledge_module.router, prefix="/api/knowledge", tags=["knowledge"])
 
     static_dir = Path(__file__).resolve().parent / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
