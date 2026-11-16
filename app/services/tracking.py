@@ -78,9 +78,10 @@ def record_attempt(session: Session, challenge_id: int, type: AttemptType,
     now = datetime.now(timezone.utc)
     if challenge.first_interaction is None:
         challenge.first_interaction = now
-    if result is AttemptResult.solved and challenge.solved_at is None:
-        challenge.status = ChallengeStatus.solved
-        challenge.solved_at = now
+    if result is AttemptResult.solved:
+        if challenge.solved_at is None:
+            challenge.status = ChallengeStatus.solved
+            challenge.solved_at = now
         if flag is not None:
             challenge.flag = flag
     session.add(challenge)
