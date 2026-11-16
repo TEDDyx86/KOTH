@@ -126,3 +126,27 @@ def challenge_summary(session: Session, challenge: Challenge) -> dict:
         end = challenge.solved_at or datetime.now(timezone.utc)
         active_seconds = (end - challenge.first_interaction).total_seconds()
     return {"attempt_count": count, "active_seconds": active_seconds}
+
+
+def add_note(session: Session, challenge_id: int, content: str) -> Note:
+    challenge = session.get(Challenge, challenge_id)
+    if challenge is None:
+        raise LookupError(f"challenge {challenge_id} not found")
+    if challenge.first_interaction is None:
+        challenge.first_interaction = datetime.now(timezone.utc)
+        session.add(challenge)
+    note = Note(challenge_id=challenge_id, content=content)
+    session.add(note)
+    session.commit()
+    session.refresh(note)
+    return note
+
+
+def note_history(session: Session, challenge_id: int) -> list[Note]:
+    query = select(Note).where(Note.challenge_id == challenge_id).order_by(Note.timestamp.desc(), Note.id.desc())
+    return list(session.exec(query).all())
+
+
+def current_note(session: Session, challenge_id: int) -> Note | None:
+    history = note_history(session, challenge_id)
+    return history[0] if history else None
