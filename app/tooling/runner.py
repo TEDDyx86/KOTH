@@ -111,3 +111,30 @@ class ToolRunner:
                              stdout=stdout.decode("utf-8", "replace"),
                              stderr=stderr.decode("utf-8", "replace"),
                              duration_s=duration, truncated=truncated)
+
+    def run(self, session, challenge, tool: str, args: list[str],
+            attempt_result: AttemptResult = AttemptResult.failed,
+            timeout_s: int | None = None, output_limit_mb: int | None = None) -> ToolRunResult:
+        from ..models import Attachment
+        from ..services import tracking
+
+        res = self.run_raw(challenge, tool, args, timeout_s=timeout_s,
+                           output_limit_mb=output_limit_mb)
+        content = (f"=== argv ===\n{' '.join(res.argv)}\n"
+                   f"=== returncode ===\n{res.returncode}\n\n"
+                   f"{res.stdout}\n--- stderr ---\n{res.stderr}")
+        path = self.storage.save(challenge.id, f"{tool}_output.txt", content.encode("utf-8"))
+        attachment = Attachment(challenge_id=challenge.id, name=f"{tool}_output.txt",
+                                path=str(path.relative_to(self.storage.storage_dir)),
+                                mime="text/plain", size=len(content), type=AttachmentType.output)
+        session.add(attachment)
+        session.commit()
+        session.refresh(attachment)
+        attempt = tracking.record_attempt(
+            session, challenge.id, AttemptType.tool,
+            f"{tool} run (rc={res.returncode})", attempt_result,
+            tool_command=" ".join(res.argv),
+            learning=res.stdout[:2000])
+        res.attachment_id = attachment.id
+        res.attempt_id = attempt.id
+        return res
