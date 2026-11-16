@@ -68,3 +68,39 @@ class ToolRunner:
                 if token.lower() not in allowed:
                     raise TargetNotAllowed(f"host '{token}' is not the challenge target")
         return args
+
+    def run_raw(self, challenge, tool: str, args: list[str],
+                timeout_s: int | None = None, output_limit_mb: int | None = None) -> ToolRunResult:
+        timeout = timeout_s or self.settings.defaults.timeout_s
+        limit_mb = output_limit_mb if output_limit_mb is not None else self.settings.defaults.output_limit_mb
+        challenge_target = challenge.target
+        executable = self.resolve_executable(tool)
+        tail = self.validate_args(challenge_target, list(args))
+        argv = [executable, *tail]
+
+        workdir = self.storage.storage_dir / "sandbox" / str(challenge.event_id) / str(challenge.id)
+        workdir.mkdir(parents=True, exist_ok=True)
+
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        start = time.monotonic()
+        try:
+            proc = subprocess.run(argv, cwd=str(workdir), capture_output=True,
+                                  timeout=timeout, creationflags=creationflags)
+            duration = time.monotonic() - start
+            stdout, stderr = proc.stdout or b"", proc.stderr or b""
+            returncode: int | None = proc.returncode
+        except subprocess.TimeoutExpired as exc:
+            duration = time.monotonic() - start
+            stdout, stderr = exc.stdout or b"", exc.stderr or b""
+            returncode = None
+
+        limit_bytes = max(limit_mb, 0) * 1024 * 1024
+        truncated = False
+        if limit_bytes and len(stdout) + len(stderr) > limit_bytes:
+            keep = max(limit_bytes, 1024)
+            stdout, stderr, truncated = stdout[:keep], b"", True
+
+        return ToolRunResult(tool=tool, argv=argv, returncode=returncode,
+                             stdout=stdout.decode("utf-8", "replace"),
+                             stderr=stderr.decode("utf-8", "replace"),
+                             duration_s=duration, truncated=truncated)
