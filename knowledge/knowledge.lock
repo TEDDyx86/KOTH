@@ -1,0 +1,17 @@
+{
+  "synced_at": "2026-11-16T22:19:15.802350+00:00",
+  "repos": [
+    {
+      "repo": "https://github.com/ljagiello/ctf-skills",
+      "ref": "main",
+      "commit": "20d182d9377f0467830f314bb0f843cae4dbf55e",
+      "path": "C:\\Users\\Administrator\\ctf-orchestrator\\knowledge\\ctf-skills"
+    },
+    {
+      "repo": "https://github.com/Felipebc2/Dispatch",
+      "ref": "main",
+      "commit": "dbe970fa36d96f24cb9f7d5c97fa0f776eccab4a",
+      "path": "C:\\Users\\Administrator\\ctf-orchestrator\\knowledge\\dispatch"
+    }
+  ]
+}
