@@ -26,6 +26,17 @@ def create_app(engine=None, storage_dir: Path | None = None) -> FastAPI:
     def health():
         return {"status": "ok"}
 
+    from .config import settings
+    from .services.storage import StorageService
+
+    app.state.storage = StorageService(storage_dir or settings.storage_dir)
+
+    from .api import challenges as challenges_module
+    from .api import events as events_module
+
+    app.include_router(events_module.router, prefix="/api/events", tags=["events"])
+    app.include_router(challenges_module.router, prefix="/api", tags=["challenges"])
+
     return app
 
 
