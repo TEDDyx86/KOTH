@@ -31,6 +31,7 @@ class AttemptType(str, Enum):
     manual = "manual"
     tool = "tool"
     agent = "agent"
+    submission = "submission"
 
 
 class AttemptResult(str, Enum):
@@ -50,6 +51,7 @@ class Event(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str
     url: str | None = None
+    flag_format: str | None = None
     starts_at: datetime | None = None
     ends_at: datetime | None = None
     status: EventStatus = EventStatus.upcoming
