@@ -16,11 +16,11 @@ class RunDeps:
 
 
 class SpecialistRunner:
-    def __init__(self, model, persona_text: str) -> None:
+    def __init__(self, model, persona_text: str, max_tool_retries: int = 4) -> None:
         agent = Agent(model, deps_type=RunDeps, output_type=SpecialistReport,
                       system_prompt=persona_text)
 
-        @agent.tool
+        @agent.tool(retries=max_tool_retries)
         def run_tool(ctx: RunContext[RunDeps], tool: str, args: list[str]) -> str:
             """Execute an allowlisted tool against the challenge via the sandbox.
             Returns the captured output (truncated)."""
@@ -28,8 +28,9 @@ class SpecialistRunner:
                 res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge,
                                           tool, args)
             except Exception as exc:  # allowlist/guard/target violations
-                raise ModelRetry(f"tool run rejected: {exc}. "
-                                 "Use an allowlisted tool and only the challenge target.")
+                raise ModelRetry(f"tool run rejected: {type(exc).__name__}: {exc}. "
+                                 "Allowed tools: python, strings, nmap, ncat, curl, "
+                                 "gdb, objdump, sqlmap. Retry with a fixed call.")
             return (f"rc={res.returncode} truncated={res.truncated}\n"
                     f"--- stdout ---\n{res.stdout[:4000]}\n"
                     f"--- stderr ---\n{res.stderr[:1000]}")

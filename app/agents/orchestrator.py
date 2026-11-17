@@ -126,7 +126,13 @@ class Orchestrator:
             report = SpecialistReport(status="FAILED",
                                       findings=[f"no specialist for {order.category}"])
         else:
-            report = specialist.run(session, challenge, order, runner=self.runner)
+            try:
+                report = specialist.run(session, challenge, order, runner=self.runner)
+            except Exception as exc:  # model/tool failure must not kill the loop
+                report = SpecialistReport(
+                    status="FAILED",
+                    findings=[f"specialist crashed: {type(exc).__name__}: {exc}"],
+                    next_step="retry with corrected tool calls or a simpler task")
         agent_session.reports.append(report)
         self._accumulate(agent_session, list(report.findings))
         tracking.record_attempt(

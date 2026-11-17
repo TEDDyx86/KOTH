@@ -8,6 +8,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app.agents.jury import JuryAgent
 from app.agents.orchestrator import Orchestrator
+from app.agents.payloads import TaskOrder
 from app.agents.specialists import SpecialistRunner
 from app.models import Challenge, Event, Note
 from app.services.storage import StorageService
@@ -111,3 +112,46 @@ def test_give_up(env, tmp_path):
     assert s0.pending_decision.action == "GIVE_UP"
     s1 = orch.approve(session, s0.id)
     assert s1.state == "gave_up"
+
+
+def test_specialist_crash_becomes_failed_report(env, tmp_path):
+    """A specialist agent that dies (e.g. model exhausted tool retries) must not
+    kill the orchestrator loop — it becomes a FAILED report."""
+    session, ch, tmp_path = env
+    runner = ToolRunner(load_tools_config(), StorageService(tmp_path / "storage"))
+
+    class CrashingSpecialist:
+        def run(self, session, challenge, order, runner=None):
+            raise RuntimeError("Tool 'run_tool' exceeded max retries count of 1")
+
+    jury = JuryAgent(_scripted("jury3", [
+        {"action": "DISPATCH", "reason": "r",
+         "order": {"category": "misc", "task": "t"}, "findings": []},
+        {"action": "WAIT_USER", "reason": "after crash", "findings": []},
+    ]), persona_text="jury test")
+    orch = Orchestrator(runner=runner, jury=jury,
+                        specialists={"misc": CrashingSpecialist()})
+    s0 = orch.start(session, ch.id)
+    s1 = orch.approve(session, s0.id)  # must not raise
+    assert s1.state == "awaiting_approval"
+    crash_reports = [r for r in s1.reports if r.status == "FAILED"]
+    assert crash_reports and "crashed" in crash_reports[0].findings[0]
+
+
+def test_run_tool_survives_bad_tool_then_recovers(env, tmp_path):
+    """run_tool retries several times: a scripted model can call a bogus tool
+    twice and still finish with a report (no UnexpectedModelBehavior)."""
+    session, ch, tmp_path = env
+    runner = ToolRunner(load_tools_config(), StorageService(tmp_path / "storage"))
+    payloads = [
+        {"tool": "definitely-not-a-tool", "args": []},
+        {"tool": "definitely-not-a-tool", "args": []},
+        {"tool": "python", "args": ["-c", "print('recovered')"]},
+        {"status": "NEED_HINT", "findings": ["recovered after retries"]},
+    ]
+    model = _scripted("spec2", payloads)
+    agent = SpecialistRunner(model, persona_text="spec test")
+    order = TaskOrder(category="misc", task="x")
+    report = agent.run(session, ch, order, runner=runner)
+    assert report.status == "NEED_HINT"
+    assert "recovered" in report.findings[0]
