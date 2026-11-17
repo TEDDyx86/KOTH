@@ -134,6 +134,59 @@ agents/
 - Providers detectados por env (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, ...);
   a UI só oferece dropdown com providers disponíveis.
 
+### Arquitetura de orquestração (diagrama do usuário, 2026-11-16)
+
+O subsistema 5 implementa o fluxo orquestrado definido no diagrama draw.io do usuário.
+Papéis (todos agentes pydantic-ai, stateless, memória 100% no PE):
+
+- **OP — Orquestrador Principal**: recebe pedido (challenge), coordena o fluxo,
+  consolida e devolve a resposta final. Não decide tática.
+- **PL — Planner/Estrategista**: prioriza por pontos/dificuldade, define critério de
+  parada (tentativas/tempo), decide desistência. Consulta o PE.
+- **RC — Reconhecimento**: port scan, strings, file type, identifica superfície
+  inicial, salva artefatos no PE. Usa o ToolRunner.
+- **JU — Subagent Júri**: analisa recon, categoriza, roteia para UM especialista por
+  vez (sequencial), grava cada Attempt no PE, coordena tática, decide "flag encontrada?".
+- **S1–S6 — Especialistas**: Web, Pwn, Crypto, Reversing, Forensics/Stego (multimodal),
+  OSINT. Recebem tarefa/dica do Júri, executam via ToolRunner, retornam payload
+  estruturado `SOLVED / NEED_HINT / FAILED` + status/logs/flag.
+- **SU — Subagent Submission**: único responsável por validar regex da flag
+  (`CTF{...}` ou formato do evento), checar duplicidade no PE e gravar resultado.
+  **Submissão manual (2026-11-16)**: apresenta a flag na UI para o operador copiar
+  e submeter na plataforma — o framework NÃO conecta a plataformas.
+- **PE — Memory Store**: todas leituras/escritas de estado passam por ele
+  (os serviços de tracking existentes). Único ponto de acesso ao banco.
+- **SB — Sandbox/Tool Executor**: nesta fase o ToolRunner **nativo Windows**
+  (decisão 2026-11-16); Docker/Kali (ghidra, pwntools) fica para fase posterior.
+
+**Controles de contexto** (regra do framework):
+
+1. Agentes sem memória própria — cada invocação monta o contexto do zero a partir
+   do PE (context builders por papel).
+2. Contexto por papel: OP ≈ challenge card + status; Júri ≈ challenge card + recon
+   resumido + últimos N attempts (learning) + lista de artefatos; especialista ≈
+   tarefa do Júri + snippets top-k do Arsenal (FTS) + refs de artefatos; SU ≈ flag
+   candidata + regex + histórico de submissões.
+3. Output de tool nunca entra direto no contexto: vai para Attachment; agentes
+   recebem digest (resumo + caminho).
+4. Troca de especialista por payload estruturado — sem acumular contexto entre papéis.
+5. Budget de tokens por papel (defaults: especialista ~8K, Júri ~12K, OP ~4K),
+   truncando do final mais velho.
+
+**Checkpoint humano por ciclo (2026-11-16)**: o Júri pausa antes de despachar cada
+especialista/nova tática, apresenta os achados até ali e aguarda aprovação
+(aprovar/rejeitar/ajustar). Nenhum ataque roda sem aprovação — o checkpoint do
+Dispatch vira regra do loop.
+
+**Modelos (2026-11-16)**: Júri/Planner/OP usam o modelo forte disponível;
+especialistas usam modelo rápido/barato. Matriz definida por persona no
+`registry.yaml` + `models.yaml`. Providers desta fase: Gemini (API key já presente,
+testada via smoke test — nota: pydantic-ai v2 usa prefixo `google:`; modelo
+`gemini-3-flash-preview` pois `gemini-2.5-flash` foi aposentado e 3.8 sofre 503),
+NVIDIA NIM e 9router (OpenAI-compatible, keys presentes), Anthropic/OpenAI quando
+o operador adicionar keys. `models.yaml` declara provider + base_url + env var;
+fallback de modelo quando 503/overload.
+
 ### Persona principal: `zyon.md`
 
 Voz derivada da persona ZYON (terse, peer register, zero disclaimers, marker `[Zyon]`,
