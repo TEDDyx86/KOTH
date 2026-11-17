@@ -1,6 +1,6 @@
-"""Smoke test: connect pydantic-ai to Gemini using the key already on this machine.
+"""Smoke test: connect pydantic-ai to NVIDIA NIM (OpenAI-compatible).
 
-Reads the google API key from opencode's auth.json (never prints it).
+Reads the nvidia API key from opencode's auth.json (never prints it).
 Usage: python scripts/model_smoke_test.py
 """
 import json
@@ -9,23 +9,28 @@ import sys
 from pathlib import Path
 
 AUTH_PATH = Path(os.environ.get("USERPROFILE", "")) / ".local" / "share" / "opencode" / "auth.json"
+BASE_URL = "https://integrate.api.nvidia.com/v1"
+MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b"  # fast role
 
 
-def load_google_key() -> str:
+def load_nvidia_key() -> str:
     data = json.loads(AUTH_PATH.read_text(encoding="utf-8"))
-    key = data.get("google", {}).get("key")
+    key = data.get("nvidia", {}).get("key")
     if not key:
-        raise SystemExit("no google key in auth.json")
+        raise SystemExit("no nvidia key in auth.json")
     return key
 
 
 def main() -> int:
-    os.environ["GEMINI_API_KEY"] = load_google_key()
-
     from pydantic_ai import Agent
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.openai import OpenAIProvider
+
+    provider = OpenAIProvider(base_url=BASE_URL, api_key=load_nvidia_key())
+    model = OpenAIChatModel(MODEL, provider=provider)
 
     agent = Agent(
-        "google:gemini-3-flash-preview",
+        model,
         system_prompt=(
             "You are a CTF triage assistant. Given a challenge description, "
             "reply in this exact format: CATEGORY: <one of crypto/web/pwn/forensics/misc> | "
