@@ -6,3 +6,6 @@ ctf.db
 storage/
 build/
 dist/
+
+scripts/win_game/bin/
+scripts/win_game/obj/
