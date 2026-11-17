@@ -44,9 +44,9 @@ class AgentsConfig:
 
 def _model_ref(raw) -> ModelRef:
     if isinstance(raw, str):
-        # shorthand: "provider/name"
-        provider, _, name = raw.partition("/")
-        return ModelRef(provider=provider, name=name)
+        # shorthand: full model id (e.g. "nvidia/nemotron-..."); provider is
+        # derived from the id prefix at resolution time
+        return ModelRef(provider="", name=raw)
     return ModelRef(provider=str(raw.get("provider", "")), name=str(raw.get("name", "")))
 
 
