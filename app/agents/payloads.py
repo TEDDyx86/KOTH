@@ -24,6 +24,7 @@ class JuryDecision(BaseModel):
     """Júri decision after each cycle."""
     action: Literal["DISPATCH", "RECHECK", "SUBMIT", "GIVE_UP", "WAIT_USER"]
     order: TaskOrder | None = None
+    flag_candidate: str | None = None
     reason: str
     findings: list[str] = []
 
