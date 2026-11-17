@@ -11,7 +11,7 @@ dependencies = [
   "python-multipart>=0.0.9",
   "pydantic>=2.7",
   "pyyaml>=6.0",
-  "pydantic-ai-slim[google]>=2.68",
+  "pydantic-ai-slim[openai]>=2.68",
 ]
 
 [project.optional-dependencies]

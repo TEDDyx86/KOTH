@@ -1,0 +1,38 @@
+roles:
+  op:
+    persona: personas/op.md
+    model: strong
+  planner:
+    persona: personas/planner.md
+    model: strong
+  recon:
+    persona: personas/recon.md
+    model: fast
+  jury:
+    persona: personas/jury.md
+    model: strong
+  submission:
+    persona: personas/submission.md
+    model: fast
+  specialist_web:
+    persona: personas/specialist_web.md
+    model: fast
+  specialist_pwn:
+    persona: personas/specialist_pwn.md
+    model: fast
+  specialist_crypto:
+    persona: personas/specialist_crypto.md
+    model: fast
+  specialist_reversing:
+    persona: personas/specialist_reversing.md
+    model: fast
+  specialist_forensics:
+    persona: personas/specialist_forensics.md
+    model: fast
+  specialist_osint:
+    persona: personas/specialist_osint.md
+    model: fast
+
+limits:
+  max_attempts: 12
+  max_minutes: 60

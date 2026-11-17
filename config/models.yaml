@@ -1,0 +1,23 @@
+providers:
+  nvidia:
+    base_url: https://integrate.api.nvidia.com/v1
+    env_var: NVIDIA_API_KEY
+  nine_router:
+    base_url: https://integrate.api.nvidia.com/v1
+    env_var: NINE_ROUTER_API_KEY
+  anthropic:
+    env_var: ANTHROPIC_API_KEY
+  openai:
+    env_var: OPENAI_API_KEY
+
+roles:
+  strong:
+    provider: nvidia
+    name: nvidia/nemotron-3-ultra-550b-a55b
+  fast:
+    provider: nvidia
+    name: nvidia/nemotron-3.5-super-vl-120b-a12b
+
+fallbacks:
+  strong:
+    - {provider: nvidia, name: nvidia/nemotron-3.5-super-vl-120b-a12b}
