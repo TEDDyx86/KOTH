@@ -230,3 +230,20 @@ def test_panel_end_to_end(tmp_path, monkeypatch):
         r = c.post(f"/challenges/{ch.id}/agent/sessions/{sid}/terminate")
         assert r.status_code == 200
         assert "rejected" in r.text
+
+
+def test_flag_manual_flow(client):
+    c, ch_id, _ = client
+    r = c.post(f"/challenges/{ch_id}/flag", data={"flag": "CTF{abc}"})
+    assert r.status_code == 200
+    assert "validada" in r.text
+
+    page = c.get(f"/challenges/{ch_id}").text
+    assert "CTF{abc}" in page          # badge na página do challenge
+    assert "solved" in page
+
+    r = c.post(f"/challenges/{ch_id}/flag", data={"flag": "CTF{abc}"})
+    assert "duplicate submission" in r.text
+
+    r = c.post(f"/challenges/{ch_id}/flag", data={"flag": "nope"})
+    assert "does not match format" in r.text

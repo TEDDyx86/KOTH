@@ -1,0 +1,7 @@
+{% if result.accepted %}
+<p class="mono" style="color: var(--flag-ok);">
+  ✔ {{ flag }} — validada; registre manualmente na plataforma
+</p>
+{% else %}
+<p class="mono" style="color: var(--accent);">✖ {{ result.reason }}</p>
+{% endif %}

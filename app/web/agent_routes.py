@@ -110,3 +110,16 @@ def agent_adjust(request: Request, challenge_id: int, session_id: str,
     _session_or_404(orch, session_id)
     sess = orch.reject(session, session_id, instruction)
     return _side(request, challenge_id, sess)
+
+
+@router.post("/challenges/{challenge_id}/flag")
+def submit_flag(request: Request, challenge_id: int, flag: str = Form(...),
+                session: Session = Depends(get_session)):
+    challenge = _challenge_or_404(session, challenge_id)
+    candidate = flag.strip()
+    result = validate_flag(session, challenge, candidate)
+    if result.accepted:
+        tracking.update_challenge(session, challenge_id,
+                                  status=ChallengeStatus.solved, flag=candidate)
+    return templates.TemplateResponse(request, "_flag_result.html",
+                                      {"result": result, "flag": candidate})
