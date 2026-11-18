@@ -40,6 +40,9 @@ def create_app(engine=None, storage_dir: Path | None = None) -> FastAPI:
     app.include_router(challenges_module.router, prefix="/api", tags=["challenges"])
     app.include_router(knowledge_module.router, prefix="/api/knowledge", tags=["knowledge"])
 
+    from .agents import api as agent_api
+    app.include_router(agent_api.router, prefix="/api/agent", tags=["agent"])
+
     static_dir = Path(__file__).resolve().parent / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
