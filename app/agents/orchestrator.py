@@ -116,6 +116,17 @@ class Orchestrator:
         self._decide(session, challenge, agent_session, extra_feedback=feedback)
         return agent_session
 
+    def terminate(self, session: Session, session_id: str,
+                  reason: str = "") -> AgentSession:
+        """Operator rejection: stop the session for good (no new decision)."""
+        agent_session = self.sessions[session_id]
+        agent_session.state = "rejected"
+        agent_session.pending_decision = None
+        self._accumulate(agent_session, [f"terminated by operator: {reason}"])
+        tracking.add_note(session, agent_session.challenge_id,
+                          f"[agent terminated] {reason}")
+        return agent_session
+
     def _dispatch(self, session: Session, challenge: Challenge,
                   agent_session: AgentSession, decision: JuryDecision) -> None:
         order = decision.order
