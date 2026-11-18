@@ -10,6 +10,7 @@
   {% if challenge.target %}target: {{ challenge.target }} · {% endif %}
   {{ summary.attempt_count }} tentativas
   {% if summary.active_seconds is not none %} · {{ (summary.active_seconds / 60) | round(1) }} min ativos{% endif %}
+  · <a href="/challenges/{{ challenge.id }}/agent">painel do agente</a>
 </p>
 
 <section class="card">

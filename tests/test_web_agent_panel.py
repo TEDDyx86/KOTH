@@ -247,3 +247,9 @@ def test_flag_manual_flow(client):
 
     r = c.post(f"/challenges/{ch_id}/flag", data={"flag": "nope"})
     assert "does not match format" in r.text
+
+
+def test_challenge_page_links_panel(client):
+    c, ch_id, _ = client
+    r = c.get(f"/challenges/{ch_id}")
+    assert f'href="/challenges/{ch_id}/agent"' in r.text
