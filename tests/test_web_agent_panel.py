@@ -253,3 +253,23 @@ def test_challenge_page_links_panel(client):
     c, ch_id, _ = client
     r = c.get(f"/challenges/{ch_id}")
     assert f'href="/challenges/{ch_id}/agent"' in r.text
+
+
+def test_polling_survives_unavailable_runtime(client, monkeypatch):
+    """Runtime sem provider (ex.: NVIDIA_API_KEY ausente) não pode derrubar
+    o polling: feed/side renderizam idle e start responde 503."""
+    from app.agents.models import ProviderUnavailable
+
+    def _broken(request):
+        raise ProviderUnavailable("provider 'nvidia' unavailable")
+
+    monkeypatch.setattr("app.web.agent_routes.get_orchestrator", _broken)
+    c, ch_id, _ = client
+
+    assert c.get(f"/challenges/{ch_id}/agent/feed").status_code == 200
+    assert c.get(f"/challenges/{ch_id}/agent/side").status_code == 200
+    assert "Nenhuma sessão" in c.get(f"/challenges/{ch_id}/agent/feed").text
+
+    r = c.post(f"/challenges/{ch_id}/agent/start")
+    assert r.status_code == 503
+    assert "unavailable" in r.text

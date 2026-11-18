@@ -13,6 +13,16 @@ from ..templates import templates
 router = APIRouter()
 
 
+def _sessions_of(request: Request):
+    """Orchestrator or None — model/provider config may be unavailable; the
+    panel must keep rendering (idle) instead of 500ing the polling."""
+    try:
+        return get_orchestrator(request)
+    except Exception as exc:  # ProviderUnavailable etc.
+        request.state.agent_error = str(exc)
+        return None
+
+
 def latest_session(orch, challenge_id: int) -> AgentSession | None:
     matches = [s for s in orch.sessions.values() if s.challenge_id == challenge_id]
     return max(matches, key=lambda s: s.created_at) if matches else None
@@ -51,7 +61,8 @@ def agent_panel(request: Request, challenge_id: int,
 def agent_feed(request: Request, challenge_id: int,
                session: Session = Depends(get_session)):
     _challenge_or_404(session, challenge_id)
-    sess = latest_session(get_orchestrator(request), challenge_id)
+    orch = _sessions_of(request)
+    sess = latest_session(orch, challenge_id) if orch else None
     return templates.TemplateResponse(request, "_agent_feed.html", {
         "challenge_id": challenge_id,
         "sess": sess.to_dict() if sess else None,
@@ -62,7 +73,8 @@ def agent_feed(request: Request, challenge_id: int,
 def agent_side(request: Request, challenge_id: int,
                session: Session = Depends(get_session)):
     _challenge_or_404(session, challenge_id)
-    sess = latest_session(get_orchestrator(request), challenge_id)
+    orch = _sessions_of(request)
+    sess = latest_session(orch, challenge_id) if orch else None
     return _side(request, challenge_id, sess)
 
 
@@ -70,7 +82,12 @@ def agent_side(request: Request, challenge_id: int,
 def agent_start(request: Request, challenge_id: int,
                 session: Session = Depends(get_session)):
     _challenge_or_404(session, challenge_id)
-    orch = get_orchestrator(request)
+    orch = _sessions_of(request)
+    if orch is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"agent runtime unavailable: "
+                   f"{getattr(request.state, 'agent_error', 'unknown')}")
     existing = latest_session(orch, challenge_id)
     if existing and existing.state in ("running", "awaiting_approval"):
         raise HTTPException(status_code=409, detail="session already active")
