@@ -1,0 +1,49 @@
+{% if not sess %}
+<div class="card">
+  <h3>Status</h3>
+  <p style="color: var(--muted);">idle — nenhuma sessão</p>
+  <form hx-post="/challenges/{{ challenge_id }}/agent/start"
+        hx-target="#agent-side" hx-swap="innerHTML">
+    <button class="btn">Iniciar agente</button>
+    <span class="htmx-indicator mono" style="color: var(--warning);">
+      trabalhando (recon + júri, pode levar minutos)…
+    </span>
+  </form>
+</div>
+{% else %}
+<div class="card">
+  <h3>Status <span class="badge {{ sess.state|badge_for }}">{{ sess.state }}</span></h3>
+  {% if sess.state == "awaiting_approval" and sess.pending_decision %}
+  <div class="checkpoint">
+    <h4>Checkpoint — aguardando você</h4>
+    <p><strong class="mono">{{ sess.pending_decision.action }}</strong> — {{ sess.pending_decision.reason }}</p>
+    {% if sess.pending_decision.order %}
+    <p class="mono">→ {{ sess.pending_decision.order.category }}: {{ sess.pending_decision.order.task }}</p>
+    {% endif %}
+    {% if sess.pending_decision.flag_candidate %}
+    <p class="mono">flag candidata: {{ sess.pending_decision.flag_candidate }}</p>
+    {% endif %}
+    <div class="actions">
+      <button class="btn"
+              hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/approve"
+              hx-target="#agent-side" hx-swap="innerHTML">Aprovar</button>
+      <button class="btn ghost"
+              hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/terminate"
+              hx-target="#agent-side" hx-swap="innerHTML"
+              hx-confirm="Encerrar esta sessão?">Rejeitar</button>
+    </div>
+    <form hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/adjust"
+          hx-target="#agent-side" hx-swap="innerHTML">
+      <input name="instruction" placeholder="instrução para o próximo passo do agente" required>
+      <button class="btn ghost">Ajustar com instrução</button>
+    </form>
+  </div>
+  {% elif sess.state == "running" %}
+  <p class="mono" style="color: var(--warning);">executando ciclo…</p>
+  {% elif sess.state == "solved" %}
+  <p class="mono" style="color: var(--flag-ok);">solved — flag validada</p>
+  {% else %}
+  <p style="color: var(--muted);">sessão encerrada ({{ sess.state }})</p>
+  {% endif %}
+</div>
+{% endif %}

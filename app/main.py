@@ -49,6 +49,9 @@ def create_app(engine=None, storage_dir: Path | None = None) -> FastAPI:
     from .web import routes as web_routes
     app.include_router(web_routes.router)
 
+    from .web import agent_routes
+    app.include_router(agent_routes.router)
+
     return app
 
 

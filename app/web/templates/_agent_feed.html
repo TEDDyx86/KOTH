@@ -1,0 +1,33 @@
+{% if not sess %}
+<div class="card">
+  <p style="color: var(--muted);">Nenhuma sessão. Inicie o agente →</p>
+</div>
+{% else %}
+<div class="card">
+  <h3>Sessão <span class="mono">{{ sess.id[:8] }}</span>
+    <span class="badge {{ sess.state|badge_for }}">{{ sess.state }}</span></h3>
+  {% if sess.findings %}
+  <div class="findings">
+    <h4>Findings acumulados</h4>
+    <ul>{% for f in sess.findings %}<li class="mono">{{ f }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  {% if sess.pending_decision %}
+  <p class="mono" style="color: var(--warning);">
+    próximo passo (júri): {{ sess.pending_decision.action }} — {{ sess.pending_decision.reason }}
+  </p>
+  {% endif %}
+  {% for rep in sess.reports %}
+  <div class="cycle">
+    <h4>Ciclo {{ loop.index }} — especialista</h4>
+    <p class="mono" style="color: var(--accent);">
+      status: {{ rep.status }}{% if rep.tools_used %} · tools: {{ rep.tools_used|join(", ") }}{% endif %}
+    </p>
+    {% if rep.findings %}
+    <ul>{% for f in rep.findings %}<li class="mono">{{ f }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if rep.next_step %}<p class="mono">next: {{ rep.next_step }}</p>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

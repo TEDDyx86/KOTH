@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Agente — {{ challenge.title }} — CTF Orchestrator{% endblock %}
+{% block content %}
+<h1>Painel do Agente
+  <span class="mono" style="color: var(--muted); font-size: 0.9rem;">{{ challenge.title }}</span>
+</h1>
+<p><a href="/challenges/{{ challenge.id }}">← voltar ao challenge</a></p>
+<div class="agent-grid">
+  <section id="agent-feed"
+           hx-get="/challenges/{{ challenge.id }}/agent/feed"
+           hx-trigger="every 1.5s" hx-swap="innerHTML">
+    {% include "_agent_feed.html" %}
+  </section>
+  <aside class="agent-side">
+    <div id="agent-side"
+         hx-get="/challenges/{{ challenge.id }}/agent/side"
+         hx-trigger="every 1.5s [!document.activeElement || !document.activeElement.closest('#agent-side')]"
+         hx-swap="innerHTML">
+      {% include "_agent_side.html" %}
+    </div>
+    <div class="card" id="agent-flag-card">
+      <h3>Registrar flag</h3>
+      <p style="color: var(--muted); font-size: 0.85rem;">
+        submissão é 100% manual — o framework só valida formato e duplicidade
+      </p>
+      <form hx-post="/challenges/{{ challenge.id }}/flag"
+            hx-target="#flag-result" hx-swap="innerHTML">
+        <input name="flag" placeholder="CTF{...}" required>
+        <button class="btn">Registrar flag</button>
+      </form>
+      <div id="flag-result"></div>
+    </div>
+  </aside>
+</div>
+{% endblock %}
