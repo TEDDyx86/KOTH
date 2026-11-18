@@ -14,9 +14,12 @@
   <aside class="agent-side">
     <div id="agent-side"
          hx-get="/challenges/{{ challenge.id }}/agent/side"
-         hx-trigger="every 1.5s [!document.activeElement || !document.activeElement.closest('#agent-side')]"
+         hx-trigger="every 1.5s [!document.querySelector('#agent-side .checkpoint') && (!document.activeElement || !document.activeElement.closest('#agent-side'))]"
          hx-swap="innerHTML">
-      {% include "_agent_side.html" %}
+      {% with challenge_id = challenge.id %}{% include "_agent_side.html" %}{% endwith %}
+    </div>
+    <div class="card" id="agent-error-card" style="display:none;">
+      <p class="mono" id="agent-error" style="color: var(--accent);"></p>
     </div>
     <div class="card" id="agent-flag-card">
       <h3>Registrar flag</h3>
@@ -32,4 +35,15 @@
     </div>
   </aside>
 </div>
+<script>
+document.addEventListener('htmx:responseError', function (evt) {
+  var card = document.getElementById('agent-error-card');
+  var box = document.getElementById('agent-error');
+  if (card && box) {
+    var xhr = evt.detail.xhr;
+    box.textContent = 'erro ' + xhr.status + ' — ' + xhr.responseText.slice(0, 200);
+    card.style.display = 'block';
+  }
+});
+</script>
 {% endblock %}

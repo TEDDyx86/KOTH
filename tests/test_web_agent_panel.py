@@ -255,6 +255,24 @@ def test_challenge_page_links_panel(client):
     assert f'href="/challenges/{ch_id}/agent"' in r.text
 
 
+def test_panel_renders_side_with_challenge_id(client):
+    """O include da lateral herda o contexto da página (que tem `challenge`,
+    não `challenge_id`) — sem o `with`, os botões saem com URL vazia:
+    /challenges//agent/... → 404 silencioso no HTMX."""
+    c, ch_id, _ = client
+    r = c.get(f"/challenges/{ch_id}/agent")
+    assert "challenges//agent" not in r.text
+    assert f"challenges/{ch_id}/agent/start" in r.text
+
+
+def test_panel_has_error_feedback_and_poll_guard(client):
+    c, ch_id, _ = client
+    r = c.get(f"/challenges/{ch_id}/agent")
+    assert "htmx:responseError" in r.text          # caixa de erro visível
+    assert "agent-error" in r.text
+    assert "agent-side .checkpoint" in r.text      # polling pausa no checkpoint
+
+
 def test_polling_survives_unavailable_runtime(client, monkeypatch):
     """Runtime sem provider (ex.: NVIDIA_API_KEY ausente) não pode derrubar
     o polling: feed/side renderizam idle e start responde 503."""

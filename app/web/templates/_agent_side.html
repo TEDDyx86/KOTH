@@ -4,8 +4,8 @@
   <p style="color: var(--muted);">idle — nenhuma sessão</p>
   <form hx-post="/challenges/{{ challenge_id }}/agent/start"
         hx-target="#agent-side" hx-swap="innerHTML">
-    <button class="btn">Iniciar agente</button>
-    <span class="htmx-indicator mono" style="color: var(--warning);">
+    <button class="btn" hx-disabled-elt="this" hx-indicator="#start-spinner">Iniciar agente</button>
+    <span id="start-spinner" class="htmx-indicator mono" style="color: var(--warning);">
       trabalhando (recon + júri, pode levar minutos)…
     </span>
   </form>
@@ -24,14 +24,19 @@
     <p class="mono">flag candidata: {{ sess.pending_decision.flag_candidate }}</p>
     {% endif %}
     <div class="actions">
-      <button class="btn"
+      <button class="btn" hx-disabled-elt="this"
               hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/approve"
-              hx-target="#agent-side" hx-swap="innerHTML">Aprovar</button>
-      <button class="btn ghost"
+              hx-target="#agent-side" hx-swap="innerHTML"
+              hx-indicator="#cycle-spinner">Aprovar</button>
+      <button class="btn ghost" hx-disabled-elt="this"
               hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/terminate"
               hx-target="#agent-side" hx-swap="innerHTML"
+              hx-indicator="#cycle-spinner"
               hx-confirm="Encerrar esta sessão?">Rejeitar</button>
     </div>
+    <p id="cycle-spinner" class="htmx-indicator mono" style="color: var(--warning);">
+      executando ciclo (especialista + júri, pode levar minutos)…
+    </p>
     <form hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/adjust"
           hx-target="#agent-side" hx-swap="innerHTML">
       <input name="instruction" placeholder="instrução para o próximo passo do agente" required>
