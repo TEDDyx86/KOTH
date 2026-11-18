@@ -64,3 +64,49 @@ def agent_side(request: Request, challenge_id: int,
     _challenge_or_404(session, challenge_id)
     sess = latest_session(get_orchestrator(request), challenge_id)
     return _side(request, challenge_id, sess)
+
+
+@router.post("/challenges/{challenge_id}/agent/start")
+def agent_start(request: Request, challenge_id: int,
+                session: Session = Depends(get_session)):
+    _challenge_or_404(session, challenge_id)
+    orch = get_orchestrator(request)
+    existing = latest_session(orch, challenge_id)
+    if existing and existing.state in ("running", "awaiting_approval"):
+        raise HTTPException(status_code=409, detail="session already active")
+    try:
+        sess = orch.start(session, challenge_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return _side(request, challenge_id, sess)
+
+
+@router.post("/challenges/{challenge_id}/agent/sessions/{session_id}/approve")
+def agent_approve(request: Request, challenge_id: int, session_id: str,
+                  session: Session = Depends(get_session)):
+    orch = get_orchestrator(request)
+    _session_or_404(orch, session_id)
+    try:
+        sess = orch.approve(session, session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return _side(request, challenge_id, sess)
+
+
+@router.post("/challenges/{challenge_id}/agent/sessions/{session_id}/terminate")
+def agent_terminate(request: Request, challenge_id: int, session_id: str,
+                    session: Session = Depends(get_session)):
+    orch = get_orchestrator(request)
+    _session_or_404(orch, session_id)
+    sess = orch.terminate(session, session_id, "rejected via panel")
+    return _side(request, challenge_id, sess)
+
+
+@router.post("/challenges/{challenge_id}/agent/sessions/{session_id}/adjust")
+def agent_adjust(request: Request, challenge_id: int, session_id: str,
+                 instruction: str = Form(...),
+                 session: Session = Depends(get_session)):
+    orch = get_orchestrator(request)
+    _session_or_404(orch, session_id)
+    sess = orch.reject(session, session_id, instruction)
+    return _side(request, challenge_id, sess)

@@ -120,3 +120,113 @@ def test_latest_session_wins(client):
     r = c.get(f"/challenges/{ch_id}/agent/feed")
     assert "new" in r.text
     assert "old" not in r.text
+
+
+def test_start_posts_and_renders_side(client):
+    c, ch_id, fake = client
+    r = c.post(f"/challenges/{ch_id}/agent/start")
+    assert r.status_code == 200
+    assert fake.calls[0] == ("start", ch_id)
+    assert "awaiting_approval" in r.text
+
+
+def test_start_409_when_session_active(client):
+    c, ch_id, fake = client
+    fake.sessions["s1"] = AgentSession(id="s1", challenge_id=ch_id,
+                                       state="running")
+    r = c.post(f"/challenges/{ch_id}/agent/start")
+    assert r.status_code == 409
+    assert fake.calls == []
+
+
+def test_approve_terminate_adjust(client):
+    c, ch_id, fake = client
+    s = AgentSession(id="s1", challenge_id=ch_id, state="awaiting_approval")
+    fake.sessions["s1"] = s
+
+    r = c.post(f"/challenges/{ch_id}/agent/sessions/s1/approve")
+    assert r.status_code == 200
+    assert ("approve", "s1") in fake.calls
+
+    r = c.post(f"/challenges/{ch_id}/agent/sessions/s1/adjust",
+               data={"instruction": "focus on the csv file"})
+    assert r.status_code == 200
+    assert ("adjust", "s1", "focus on the csv file") in fake.calls
+
+    r = c.post(f"/challenges/{ch_id}/agent/sessions/s1/terminate")
+    assert r.status_code == 200
+    assert "rejected" in r.text
+    assert ("terminate", "s1", "rejected via panel") in fake.calls
+
+
+def test_unknown_session_404(client):
+    c, ch_id, _ = client
+    r = c.post(f"/challenges/{ch_id}/agent/sessions/nope/approve")
+    assert r.status_code == 404
+    r = c.post(f"/challenges/{ch_id}/agent/sessions/nope/terminate")
+    assert r.status_code == 404
+    r = c.post(f"/challenges/{ch_id}/agent/sessions/nope/adjust",
+               data={"instruction": "x"})
+    assert r.status_code == 404
+
+
+def test_panel_end_to_end(tmp_path, monkeypatch):
+    """Wiring real: painel + orchestrator com modelos scriptados."""
+    import app.agents.api as agent_api
+    from app.agents.jury import JuryAgent
+    from app.agents.orchestrator import Orchestrator
+    from app.agents.specialists import SpecialistRunner
+    from app.services.storage import StorageService
+    from app.tooling.config import load_tools_config
+    from app.tooling.runner import ToolRunner
+    from tests.test_api_agent import _scripted
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'e.db'}",
+                           connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    storage = StorageService(tmp_path / "storage")
+
+    def _fake_orchestrator(storage_dir):
+        runner = ToolRunner(load_tools_config(), storage)
+        jury = JuryAgent(_scripted([
+            {"action": "DISPATCH", "reason": "recon first",
+             "order": {"category": "misc", "task": "look"}, "findings": []},
+            {"action": "RECHECK", "reason": "nothing yet", "findings": []},
+        ]), persona_text="jury test")
+        specialist = SpecialistRunner(_scripted([
+            {"status": "NEED_HINT", "findings": ["nothing found"]},
+        ]), persona_text="spec test")
+        return Orchestrator(runner=runner, jury=jury,
+                            specialists={"misc": specialist})
+
+    monkeypatch.setattr(agent_api, "_make_orchestrator", _fake_orchestrator)
+    app = create_app(engine=engine, storage_dir=tmp_path / "storage")
+    with TestClient(app) as c:
+        with Session(engine) as session:
+            event = Event(name="ctf")
+            session.add(event)
+            session.commit()
+            session.refresh(event)
+            ch = Challenge(event_id=event.id, title="c")
+            session.add(ch)
+            session.commit()
+            session.refresh(ch)
+
+        r = c.post(f"/challenges/{ch.id}/agent/start")
+        assert r.status_code == 200
+        assert "awaiting_approval" in r.text
+
+        r = c.get(f"/challenges/{ch.id}/agent/feed")
+        assert "recon first" in r.text
+
+        r_side = c.get(f"/challenges/{ch.id}/agent/side")
+        m = re.search(r"sessions/([0-9a-f]+)/approve", r_side.text)
+        sid = m.group(1)
+
+        r = c.post(f"/challenges/{ch.id}/agent/sessions/{sid}/approve")
+        assert r.status_code == 200
+        assert "RECHECK" in r.text
+
+        r = c.post(f"/challenges/{ch.id}/agent/sessions/{sid}/terminate")
+        assert r.status_code == 200
+        assert "rejected" in r.text
