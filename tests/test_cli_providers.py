@@ -28,6 +28,9 @@ def test_build_cli_commands_portable():
     assert build_cli_command("cli_gemini", "gemini", "gemini-2.5-pro") == [
         "gemini", "-p", " ", "-m", "gemini-2.5-pro",
     ]
+    assert build_cli_command("cli_agy", "agy", "gemini-4-neon-high") == [
+        "agy", "--input-format", "stream-json", "--output-format", "stream-json", "--disable-slash-commands", "--model", "gemini-4-neon-high",
+    ]
 
 
 def test_missing_cli_raises_provider_unavailable(monkeypatch):
@@ -135,3 +138,52 @@ def test_settings_cli_providers_activate_and_test(tmp_path, monkeypatch):
         cfg2 = load_models(tmp_models)
         assert cfg2.roles["strong"].provider == "cli_gemini"
         assert cfg2.roles["fast"].provider == "cli_gemini"
+
+
+def test_agy_cli_stream_json_jury_and_specialist(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'agy.db'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr("app.agents.cli_providers.shutil.which", lambda name: "/usr/bin/agy" if name == "agy" else None)
+
+    calls = {"n": 0}
+
+    def fake_agy_run(cmd, input, text, encoding, errors, capture_output, timeout, creationflags):
+        calls["n"] += 1
+        sent = json.loads(input.strip())
+        assert sent["event"] == "user"
+        assert "content" in sent["message"]
+        if calls["n"] == 1:
+            resp_obj = {
+                "action": "DISPATCH",
+                "order": {"category": "crypto", "task": "solve", "hints": [], "max_tool_runs": 2},
+                "reason": "agy ok",
+                "findings": ["init"],
+            }
+        else:
+            resp_obj = {"output": {"status": "SOLVED", "flag_candidate": "CTF{agy_ok}", "findings": ["cracked"]}}
+        ndjson = "\n".join([
+            json.dumps({"event": "init", "conversation_id": "c1"}),
+            json.dumps({"event": "result", "result": {"status": "SUCCESS", "response": json.dumps(resp_obj)}}),
+        ])
+        return SimpleNamespace(returncode=0, stdout=ndjson, stderr="")
+
+    monkeypatch.setattr("app.agents.cli_providers.subprocess.run", fake_agy_run)
+    with Session(engine) as session:
+        ev = Event(name="ctf")
+        session.add(ev)
+        session.commit()
+        session.refresh(ev)
+        ch = Challenge(event_id=ev.id, title="c1")
+        session.add(ch)
+        session.commit()
+        session.refresh(ch)
+
+        jury = JuryAgent(resolve_model(ModelRef(provider="cli_agy", name="gemini-4-neon-high"), ModelsConfig()), "jury")
+        dec = jury.decide(session, ch, [])
+        assert dec.action == "DISPATCH"
+
+        runner = ToolRunner(load_tools_config(), StorageService(tmp_path / "storage"))
+        spec = SpecialistRunner(resolve_model(ModelRef(provider="cli_agy", name="gemini-3.8-flash-medium"), ModelsConfig()), "spec")
+        rep = spec.run(session, ch, TaskOrder(category="crypto", task="solve"), runner=runner)
+        assert rep.status == "SOLVED"
+        assert rep.flag_candidate == "CTF{agy_ok}"

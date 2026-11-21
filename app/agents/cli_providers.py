@@ -59,6 +59,40 @@ CLI_PROVIDER_CATALOG: tuple[CliProviderSpec, ...] = (
         fast_default="gemini-2.5-flash",
         models=("gemini-2.5-pro", "gemini-2.5-flash", "default"),
     ),
+    CliProviderSpec(
+        name="cli_agy",
+        label="Google Antigravity CLI (agy)",
+        executable="agy",
+        login_hint="agy (autenticado no Antigravity)",
+        strong_default="gemini-4-neon-high",
+        fast_default="gemini-3.8-flash-medium",
+        models=(
+            "gemini-4-neon-high",
+            "gemini-4-neon-xhigh",
+            "gemini-4-neon-medium",
+            "gemini-4-neon-low",
+            "gemini-4-argon-high",
+            "gemini-4-argon-medium",
+            "gemini-4-argon-low",
+            "gemini-4-hydrogen-high",
+            "gemini-4-hydrogen-xhigh",
+            "gemini-4-hydrogen-medium",
+            "gemini-4-hydrogen-low",
+            "gemini-pro-orchestrator-neon",
+            "gemini-pro-orchestrator-g1-pro",
+            "gemini-3.8-flash-high",
+            "gemini-3.8-flash-medium",
+            "gemini-3.8-flash-low",
+            "claude-opus-5-5-high",
+            "claude-opus-5-5-medium",
+            "claude-opus-5-5-low",
+            "claude-sonnet-5-5-high",
+            "claude-sonnet-5-5-medium",
+            "claude-sonnet-5-5-low",
+            "gpt-oss-120b-medium",
+            "default",
+        ),
+    ),
 )
 
 CLI_CATALOG_BY_NAME: dict[str, CliProviderSpec] = {c.name: c for c in CLI_PROVIDER_CATALOG}
@@ -105,7 +139,42 @@ def build_cli_command(
             cmd.extend(["-m", model])
         return cmd
 
+    if provider_name == "cli_agy":
+        cmd = [
+            exe_path,
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
+            "--disable-slash-commands",
+        ]
+        if use_model:
+            cmd.extend(["--model", model])
+        return cmd
+
     raise ValueError(f"unknown CLI provider: {provider_name}")
+
+
+def _parse_agy_stream_json(stdout: str) -> str:
+    """Extract the final assistant response from agy --output-format stream-json NDJSON."""
+    deltas: list[str] = []
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        ev = obj.get("event")
+        if ev == "result":
+            res = obj.get("result") or {}
+            if str(res.get("status", "")).upper() == "ERROR":
+                raise RuntimeError(f"agy CLI failed: {res.get('error') or 'unknown error'}")
+            return str(res.get("response") or "").strip()
+        if ev == "step_update":
+            upd = obj.get("step_update") or {}
+            if upd.get("step_type") == "agent_response" and upd.get("text_delta"):
+                deltas.append(str(upd["text_delta"]))
+    return "".join(deltas).strip() or stdout.strip()
 
 
 def _run_cli_prompt(
@@ -115,7 +184,6 @@ def _run_cli_prompt(
     *,
     timeout_s: int = 180,
 ) -> str:
-    spec = CLI_PROVIDER_CATALOG[0]
     spec = CLI_CATALOG_BY_NAME[provider_name]
     exe = shutil.which(spec.executable)
     if exe is None:
@@ -131,12 +199,17 @@ def _run_cli_prompt(
         os.close(fd)
         out_path = Path(raw_path)
 
+    stdin_text = (
+        json.dumps({"event": "user", "message": {"content": prompt}}) + "\n"
+        if provider_name == "cli_agy"
+        else prompt
+    )
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         cmd = build_cli_command(provider_name, exe, model_name, output_file=out_path)
         proc = subprocess.run(
             cmd,
-            input=prompt,
+            input=stdin_text,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -154,6 +227,8 @@ def _run_cli_prompt(
         if proc.returncode != 0:
             err_msg = (stderr or stdout or f"exit code {proc.returncode}")[:400]
             raise RuntimeError(f"{spec.executable} CLI failed: {err_msg}")
+        if provider_name == "cli_agy":
+            return _parse_agy_stream_json(stdout)
         return stdout
     finally:
         if out_path is not None and out_path.exists():
