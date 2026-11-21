@@ -14,6 +14,7 @@ router = APIRouter()
 class EventCreate(BaseModel):
     name: str
     url: str | None = None
+    flag_format: str | None = None
     starts_at: datetime | None = None
     ends_at: datetime | None = None
 
@@ -25,7 +26,8 @@ class StatusUpdate(BaseModel):
 @router.post("", response_model=Event)
 def create_event(body: EventCreate, session: Session = Depends(get_session)):
     return tracking.create_event(session, body.name, url=body.url,
-                                 starts_at=body.starts_at, ends_at=body.ends_at)
+                                 starts_at=body.starts_at, ends_at=body.ends_at,
+                                 flag_format=body.flag_format)
 
 
 @router.get("", response_model=list[Event])

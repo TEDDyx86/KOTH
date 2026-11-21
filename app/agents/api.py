@@ -1,17 +1,20 @@
 from pathlib import Path
-from typing import Annotated
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlmodel import Session
 
 from ..database import get_session
+from ..models import Event
 from ..tooling.config import load_tools_config
+from ..tooling.doctor import inventory
 from ..tooling.runner import ToolRunner
 from .config import load_agents, load_models
 from .jury import JuryAgent
-from .models import resolve_for_role
+from .models import resolve_candidates_for_role
 from .orchestrator import Orchestrator
+from .planner import planner_rank
 from .specialists import SpecialistRunner
 
 router = APIRouter()
@@ -31,14 +34,20 @@ def _make_orchestrator(storage_dir) -> Orchestrator:
     models_cfg = load_models()
     agents_cfg = load_agents()
     runner = ToolRunner(load_tools_config(), storage_dir)
-    jury = JuryAgent(resolve_for_role("jury", agents_cfg.roles["jury"].model, models_cfg),
-                     persona_text=_persona_text("jury"))
-    specialists = {
-        cat: SpecialistRunner(
-            resolve_for_role(f"specialist_{cat}", "fast", models_cfg),
-            persona_text=_persona_text(f"specialist_{cat}"))
-        for cat in SPECIALIST_CATEGORIES
-    }
+    jury_role = agents_cfg.roles["jury"].model if "jury" in agents_cfg.roles else "strong"
+    jury_models = resolve_candidates_for_role("jury", jury_role, models_cfg)
+    jury = JuryAgent(jury_models[0], persona_text=_persona_text("jury"),
+                     fallback_models=jury_models[1:])
+    specialists = {}
+    for cat in SPECIALIST_CATEGORIES:
+        role_key = f"specialist_{cat}"
+        model_role = agents_cfg.roles[role_key].model if role_key in agents_cfg.roles else "fast"
+        cands = resolve_candidates_for_role(role_key, model_role, models_cfg)
+        specialists[cat] = SpecialistRunner(
+            cands[0],
+            persona_text=_persona_text(role_key),
+            fallback_models=cands[1:],
+        )
     return Orchestrator(runner=runner, jury=jury, specialists=specialists,
                         agents_limits=agents_cfg.limits)
 
@@ -52,29 +61,49 @@ def get_orchestrator(request: Request) -> Orchestrator:
     return orch
 
 
+class StartIn(BaseModel):
+    mode: Literal["supervised", "auto"] = "supervised"
+    background: bool = False
+
+
 class ApproveIn(BaseModel):
     note: str | None = None
+    mode: Literal["supervised", "auto"] | None = None
+    background: bool = False
 
 
 class RejectIn(BaseModel):
     feedback: str
 
 
+class TerminateIn(BaseModel):
+    reason: str = ""
+
+
 @router.post("/{challenge_id}/start", status_code=201)
 def start_session(challenge_id: int, request: Request,
+                  body: StartIn | None = None,
                   session: Session = Depends(get_session)):
     orch = get_orchestrator(request)
+    mode = body.mode if body else "supervised"
+    background = body.background if body else False
     try:
-        agent_session = orch.start(session, challenge_id)
+        if background:
+            agent_session = orch.start_background(
+                session.get_bind(), session, challenge_id, mode=mode)
+        else:
+            agent_session = orch.start(session, challenge_id, mode=mode)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return agent_session.to_dict()
 
 
 @router.get("/sessions/{session_id}")
-def get_session_state(session_id: str, request: Request):
+def get_session_state(session_id: str, request: Request,
+                      session: Session = Depends(get_session)):
     orch = get_orchestrator(request)
-    agent_session = orch.sessions.get(session_id)
+    agent_session = (orch.get_session(session, session_id)
+                     if hasattr(orch, "get_session") else orch.sessions.get(session_id))
     if agent_session is None:
         raise HTTPException(status_code=404, detail="unknown session")
     return agent_session.to_dict()
@@ -84,11 +113,17 @@ def get_session_state(session_id: str, request: Request):
 def approve(session_id: str, body: ApproveIn, request: Request,
             session: Session = Depends(get_session)):
     orch = get_orchestrator(request)
-    agent_session = orch.sessions.get(session_id)
+    agent_session = (orch.get_session(session, session_id)
+                     if hasattr(orch, "get_session") else orch.sessions.get(session_id))
     if agent_session is None:
         raise HTTPException(status_code=404, detail="unknown session")
     try:
-        updated = orch.approve(session, session_id)
+        if body.background:
+            updated = orch.approve_background(session.get_bind(), session, session_id, mode=body.mode)
+        elif body.mode is not None:
+            updated = orch.approve(session, session_id, mode=body.mode)
+        else:
+            updated = orch.approve(session, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return updated.to_dict()
@@ -98,7 +133,43 @@ def approve(session_id: str, body: ApproveIn, request: Request,
 def reject(session_id: str, body: RejectIn, request: Request,
            session: Session = Depends(get_session)):
     orch = get_orchestrator(request)
-    agent_session = orch.sessions.get(session_id)
+    agent_session = (orch.get_session(session, session_id)
+                     if hasattr(orch, "get_session") else orch.sessions.get(session_id))
     if agent_session is None:
         raise HTTPException(status_code=404, detail="unknown session")
-    return orch.reject(session, session_id, body.feedback).to_dict()
+    try:
+        return orch.reject(session, session_id, body.feedback).to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post("/sessions/{session_id}/terminate")
+def terminate(session_id: str, request: Request,
+              body: TerminateIn | None = None,
+              session: Session = Depends(get_session)):
+    orch = get_orchestrator(request)
+    agent_session = (orch.get_session(session, session_id)
+                     if hasattr(orch, "get_session") else orch.sessions.get(session_id))
+    if agent_session is None:
+        raise HTTPException(status_code=404, detail="unknown session")
+    reason = body.reason if body else ""
+    return orch.terminate(session, session_id, reason).to_dict()
+
+
+@router.get("/events/{event_id}/rank")
+def event_planner_rank(event_id: int, session: Session = Depends(get_session)):
+    event = session.get(Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="event not found")
+    ranked = planner_rank(session, event)
+    return [
+        {"challenge_id": ch.id, "title": ch.title, "category": ch.category,
+         "points": ch.points, "difficulty": ch.difficulty, "status": ch.status,
+         "score": round(score, 2)}
+        for ch, score in ranked
+    ]
+
+
+@router.get("/tools/inventory")
+def tools_inventory():
+    return inventory(load_tools_config())

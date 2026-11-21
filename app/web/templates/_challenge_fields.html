@@ -1,0 +1,24 @@
+<div class="form-grid">
+  <input name="title" placeholder="Título do challenge" value="{{ ch.title if ch else '' }}" required>
+  <select name="category">
+    {% for cat in ["web","pwn","crypto","reverse","forensics","osint","misc","ai-ml","custom"] %}
+      <option value="{{ cat }}" {% if ch and ch.category == cat %}selected{% endif %}>{{ cat }}</option>
+    {% endfor %}
+  </select>
+  <input name="points" type="number" placeholder="Pontos" value="{{ ch.points if ch else 100 }}">
+  <select name="difficulty">
+    <option value="">dificuldade (opcional)</option>
+    {% for diff in ["easy","medium","hard","insane"] %}
+      <option value="{{ diff }}" {% if ch and ch.difficulty and ch.difficulty.value == diff %}selected{% endif %}>{{ diff }}</option>
+    {% endfor %}
+  </select>
+  <input name="target" placeholder="host:porta (opcional, ex: 10.10.10.5:1337)" value="{{ ch.target or '' if ch else '' }}">
+  <input name="tags" placeholder="tags (ex: sqli,rng)" value="{{ ch.tags if ch else '' }}">
+</div>
+<textarea name="description" rows="3" placeholder="Descrição / enunciado (Markdown)">{{ ch.description if ch else '' }}</textarea>
+{% if not ch %}
+<label style="display:block; font-size:0.85rem; color:var(--muted);">
+  Anexos do desafio (download, múltiplos arquivos):
+  <input type="file" name="files" multiple>
+</label>
+{% endif %}

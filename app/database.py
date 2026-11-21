@@ -23,7 +23,14 @@ def ensure_schema(engine) -> None:
                 conn.commit()
 
 
+_ENGINES: dict[str, object] = {}
+
+
 def default_engine():
+    db_key = str(settings.db_path.resolve())
+    cached = _ENGINES.get(db_key)
+    if cached is not None:
+        return cached
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(
         f"sqlite:///{settings.db_path}",
@@ -31,6 +38,7 @@ def default_engine():
     )
     SQLModel.metadata.create_all(engine)
     ensure_schema(engine)
+    _ENGINES[db_key] = engine
     return engine
 
 

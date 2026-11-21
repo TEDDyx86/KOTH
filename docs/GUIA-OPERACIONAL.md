@@ -66,24 +66,29 @@ A variável vale só para a sessão do PowerShell. Para persistir:
 
 ## 4. Subir o servidor
 
-**Opção A — comando direto (recomendado para debug):**
+**Opção A — comando único (Windows / Linux / macOS):**
 
-```powershell
-python -m uvicorn app.main:app --port 8777
+```bash
+koth
+# ou headless:
+koth serve --port 8777 --no-browser
+# ou diagnóstico de ferramentas / Docker / provedores:
+koth doctor
 ```
 
-**Opção B — script:** duplo clique em `iniciar_orchestrator.bat` (porta 8000, valida Python e
-dependências, abre no diretório correto via `%~dp0`).
+**Opção B — uvicorn direto (para debug com `--reload`):**
 
-**Opção C — recarregar templates automaticamente:** o Jinja2 do FastAPI já recarrega `.html` sem
-restart. Para recarregar **código Python** durante o desenvolvimento:
-
-```powershell
+```bash
 python -m uvicorn app.main:app --port 8777 --reload
 ```
 
-> `--reload` **apaga as sessões de agente** a cada alteração (elas vivem em memória). Use só fora
-> de um ciclo em andamento.
+**Opção C — Docker Sandbox (opcional):**
+
+```bash
+docker build -t koth-sandbox:latest -f Dockerfile.sandbox .
+```
+
+Depois ative `docker` em **Configurações → Sandbox & Limites** (`/settings?tab=runtime`).
 
 Checagem de saúde:
 

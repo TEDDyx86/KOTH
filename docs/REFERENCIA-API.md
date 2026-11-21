@@ -199,19 +199,24 @@ Formato de sessão (`AgentSession.to_dict()`):
 
 ### `POST /api/agent/{challenge_id}/start`
 
-Cria a sessão, roda o recon e chama o júri. **Síncrono** — pode demorar.
+Cria a sessão, roda o recon e chama o júri (ou executa o loop completo se `mode="auto"`).
+Corpo opcional:
 
-- `201` → sessão (normalmente já em `awaiting_approval`)
+```json
+{"mode": "supervised", "background": false}
+```
+
+- `201` → sessão (`awaiting_approval`, `running` em background, ou `solved`/`gave_up` em `auto`)
 - `404` → challenge inexistente
 - `503` → runtime indisponível (provider sem chave): `{"detail": "provider 'nvidia' unavailable: env 'NVIDIA_API_KEY' not set"}`
 
 ### `GET /api/agent/sessions/{session_id}`
 
-Estado atual da sessão. `404` se o id não existir (sessões vivem em memória).
+Estado atual da sessão (carregada da memória ou hidratada do SQLite). `404` se o id não existir.
 
 ### `POST /api/agent/sessions/{session_id}/approve`
 
-Corpo opcional: `{"note": "..."}`. Executa **uma** decisão pendente (despacha especialista, valida
+Corpo opcional: `{"note": "...", "background": false}`. Executa **uma** decisão pendente (despacha especialista, valida
 flag, ou encerra por `GIVE_UP`) e devolve a sessão atualizada.
 
 - `409` → `"session <id> is not awaiting approval"`
@@ -223,11 +228,19 @@ flag, ou encerra por `GIVE_UP`) e devolve a sessão atualizada.
 {"feedback": "não é RNG, olhe o padding do AES"}
 ```
 
-Grava a nota `[agent rejected] ...` e pede nova decisão ao júri **com** o feedback. Devolve a
-sessão atualizada.
+Grava a nota `[agent rejected] ...` e pede nova decisão ao júri **com** o feedback. Devolve `409` se a sessão não estiver em `awaiting_approval`.
 
-> `terminate` (encerrar de vez) existe apenas no painel HTML:
-> `POST /challenges/{id}/agent/sessions/{sid}/terminate`. Não há rota REST equivalente.
+### `POST /api/agent/sessions/{session_id}/terminate`
+
+Corpo opcional: `{"reason": "..."}`. Encerra a sessão definitivamente (`state=rejected`), consolida `final_report` e grava nota `[agent terminated] ...`.
+
+### `GET /api/agent/events/{event_id}/rank`
+
+Devolve o ranking determinístico de challenges do evento via `planner_rank` (pontos + dificuldade + status).
+
+### `GET /api/agent/tools/inventory`
+
+Devolve o inventário do `Tool Doctor` (`[{name, mode, path, present}]`).
 
 ---
 

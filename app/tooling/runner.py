@@ -3,8 +3,11 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
-from ..models import AttachmentType, AttemptResult, AttemptType
+from sqlmodel import select
+
+from ..models import Attachment, AttachmentType, AttemptResult, AttemptType
 from .config import ToolSettings
 
 METACHARS = set(";|&$`\n\r")
@@ -48,15 +51,68 @@ class ToolRunner:
     def resolve_executable(self, tool: str) -> str:
         if tool not in self.settings.tools:
             raise ToolNotAllowed(f"tool '{tool}' not in allowlist")
+        spec = self.settings.tools[tool]
+        if spec.mode == "docker":
+            path = shutil.which("docker")
+            if path is None:
+                raise ToolNotAllowed("docker not found on PATH for docker-mode tool")
+            return path
+        if spec.mode == "wsl":
+            path = shutil.which("wsl")
+            if path is None:
+                raise ToolNotAllowed("wsl not found on PATH for wsl-mode tool")
+            return path
         path = shutil.which(tool)
         if path is None:
             raise ToolNotAllowed(f"tool '{tool}' not found on PATH")
         return path
 
+    def sandbox_workdir(self, challenge) -> Path:
+        workdir = self.storage.storage_dir / "sandbox" / str(challenge.event_id) / str(challenge.id)
+        workdir.mkdir(parents=True, exist_ok=True)
+        return workdir
+
+    def stage_downloads(self, session, challenge) -> list[Path]:
+        """Copy download attachments into the challenge sandbox workdir so tools
+        running with cwd=sandbox can access them by filename directly."""
+        if session is None or self.storage is None:
+            return []
+        workdir = self.sandbox_workdir(challenge)
+        rows = list(session.exec(select(Attachment).where(
+            Attachment.challenge_id == challenge.id,
+            Attachment.type == AttachmentType.download,
+        )).all())
+        staged: list[Path] = []
+        for att in rows:
+            src = self.storage.storage_dir / att.path
+            if not src.exists():
+                continue
+            safe_name = Path(att.name).name
+            if not safe_name:
+                continue
+            dst = workdir / safe_name
+            if not dst.exists() or dst.stat().st_size != src.stat().st_size:
+                shutil.copy2(src, dst)
+            staged.append(dst)
+        return staged
+
+    def _build_command(self, tool: str, args: list[str], challenge_target: str | None,
+                       workdir: Path | None = None) -> list[str]:
+        executable = self.resolve_executable(tool)
+        spec = self.settings.tools[tool]
+        tail = self.validate_args(challenge_target, list(args), guard=spec.guard)
+        if spec.mode == "docker":
+            image = spec.image or self.settings.defaults.docker_image
+            mount = str(workdir.resolve()) if workdir else str(Path.cwd().resolve())
+            net_args = ["--network", "none"] if not challenge_target else []
+            return [executable, "run", "--rm", *net_args, "-v", f"{mount}:/work",
+                    "-w", "/work", image, tool, *tail]
+        if spec.mode == "wsl":
+            return [executable, tool, *tail]
+        return [executable, *tail]
+
     def build_argv(self, tool: str, args: list[str]) -> list[str]:
-        spec = self.settings.tools.get(tool)
-        guard = spec.guard if spec else "strict"
-        return [self.resolve_executable(tool), *self.validate_args(None, list(args), guard=guard)]
+        return self._build_command(tool, args, challenge_target=None)
 
     def validate_args(self, challenge_target: str | None, args: list[str],
                       guard: str = "strict") -> list[str]:
@@ -78,14 +134,8 @@ class ToolRunner:
                 timeout_s: int | None = None, output_limit_mb: int | None = None) -> ToolRunResult:
         timeout = timeout_s or self.settings.defaults.timeout_s
         limit_mb = output_limit_mb if output_limit_mb is not None else self.settings.defaults.output_limit_mb
-        challenge_target = challenge.target
-        executable = self.resolve_executable(tool)
-        spec = self.settings.tools[tool]
-        tail = self.validate_args(challenge_target, list(args), guard=spec.guard)
-        argv = [executable, *tail]
-
-        workdir = self.storage.storage_dir / "sandbox" / str(challenge.event_id) / str(challenge.id)
-        workdir.mkdir(parents=True, exist_ok=True)
+        workdir = self.sandbox_workdir(challenge)
+        argv = self._build_command(tool, args, challenge_target=challenge.target, workdir=workdir)
 
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         start = time.monotonic()
@@ -115,9 +165,9 @@ class ToolRunner:
     def run(self, session, challenge, tool: str, args: list[str],
             attempt_result: AttemptResult = AttemptResult.failed,
             timeout_s: int | None = None, output_limit_mb: int | None = None) -> ToolRunResult:
-        from ..models import Attachment
         from ..services import tracking
 
+        self.stage_downloads(session, challenge)
         res = self.run_raw(challenge, tool, args, timeout_s=timeout_s,
                            output_limit_mb=output_limit_mb)
         content = (f"=== argv ===\n{' '.join(res.argv)}\n"

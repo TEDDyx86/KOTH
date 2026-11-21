@@ -1,0 +1,432 @@
+{% extends "base.html" %}
+{% block title %}Configurações — KOTH{% endblock %}
+{% block content %}
+<h1>Configurações do KOTH</h1>
+
+{% if saved %}
+<div class="card card-ok">
+  <p class="mono" style="margin:0;">
+    <span class="badge flag-ok">atualizado</span>
+    {% if saved == "limits" %}Limites do Planner salvos em config/agents.yaml e aplicados ao runtime.
+    {% elif saved == "provider" %}Provedor salvo localmente em storage/provider_keys.json (gitignored) e aplicado ao runtime.
+    {% elif saved == "removed" %}Credencial removida do ambiente local.
+    {% elif saved == "imported" %}Chaves importadas de ~/.local/share/opencode/auth.json.
+    {% elif saved == "models" %}Modelos do Orquestrador atualizados em config/models.yaml e aplicados imediatamente.
+    {% elif saved == "sandbox" %}Modo do Sandbox atualizado em config/tools.yaml e aplicado ao runtime.
+    {% endif %}
+  </p>
+</div>
+{% endif %}
+
+<div class="koth-tabs" role="tablist">
+  <button type="button" class="koth-tab {% if active_tab == 'providers' %}active{% endif %}" onclick="kothSwitchTab('providers', this)">Provedores &amp; Auth</button>
+  <button type="button" class="koth-tab {% if active_tab == 'models' %}active{% endif %}" onclick="kothSwitchTab('models', this)">Modelos &amp; IA</button>
+  <button type="button" class="koth-tab {% if active_tab == 'runtime' %}active{% endif %}" onclick="kothSwitchTab('runtime', this)">Sandbox &amp; Limites</button>
+  <button type="button" class="koth-tab {% if active_tab == 'brand' %}active{% endif %}" onclick="kothSwitchTab('brand', this)">Identidade Visual</button>
+</div>
+
+<!-- TAB 1: PROVEDORES -->
+<div id="tab-providers" class="koth-tab-panel {% if active_tab == 'providers' %}active{% endif %}">
+  <section class="card">
+    <div class="row-actions" style="justify-content:space-between; align-items:center; margin-bottom:0.85rem;">
+      <div>
+        <h2 style="margin-bottom:0.2rem;">Provedores API Conectados</h2>
+        <p style="color:var(--muted); font-size:0.84rem; margin:0;">
+          Exibindo apenas provedores configurados. Chaves ficam isoladas em <span class="mono">storage/provider_keys.json</span>.
+        </p>
+      </div>
+      <div class="row-actions">
+        {% if has_opencode_auth %}
+        <form method="post" action="/settings/providers/import-opencode">
+          <button class="btn ghost" type="submit">Importar OpenCode</button>
+        </form>
+        {% endif %}
+        <button class="btn" type="button" onclick="var el=document.getElementById('add-provider-box'); el.open = !el.open;">+ Adicionar provedor</button>
+      </div>
+    </div>
+
+    <details id="add-provider-box" class="add-provider-box">
+      <summary style="cursor:pointer; font-weight:600;">Conectar novo provedor de API</summary>
+      <form method="post" action="/settings/providers/add" style="display:grid; gap:0.6rem; margin-top:0.75rem;">
+        <div class="form-grid">
+          <select id="add-provider-select" name="provider_name" onchange="kothUpdateAddDefaults(this)">
+            {% for p in providers_status %}
+              <option value="{{ p.name }}"
+                      data-url="{{ p.base_url }}"
+                      data-env="{{ p.env_var }}"
+                      data-req="{{ '1' if p.requires_key else '0' }}">{{ p.label }} ({{ p.env_var }})</option>
+            {% endfor %}
+          </select>
+          <input id="add-provider-key" type="password" name="api_key" placeholder="API Key…" autocomplete="off">
+          <input id="add-provider-url" type="text" name="base_url" value="{{ providers_status[0].base_url if providers_status else '' }}" placeholder="Base URL (opcional)">
+        </div>
+        <div class="row-actions" style="justify-content:space-between; align-items:center;">
+          <label class="cli-toggle">
+            <input type="checkbox" name="activate_now" value="true">
+            <span>Ativar como modelo padrão agora</span>
+          </label>
+          <button class="btn" type="submit">Salvar provedor</button>
+        </div>
+      </form>
+    </details>
+
+    {% if added_providers %}
+    <div style="display:grid; gap:0.55rem;">
+      {% for p in added_providers %}
+      <div class="provider-row">
+        <div class="row-actions" style="justify-content:space-between; align-items:center;">
+          <div class="row-actions" style="align-items:center;">
+            <strong>{{ p.label }}</strong>
+            {% if p.connected %}
+              <span class="badge flag-ok mono">conectado{% if p.masked %} ({{ p.masked }}){% endif %} · {{ p.source }}</span>
+            {% else %}
+              <span class="badge mono">sem chave ({{ p.env_var }})</span>
+            {% endif %}
+            <span id="test-{{ p.name }}"></span>
+          </div>
+          <div class="row-actions">
+            {% if p.strong_default %}
+            <form method="post" action="/settings/providers/{{ p.name }}/activate">
+              <button class="btn ghost" type="submit" style="padding:0.28rem 0.65rem; font-size:0.78rem;">Usar agora</button>
+            </form>
+            {% endif %}
+            <button class="btn ghost" type="button" style="padding:0.28rem 0.65rem; font-size:0.78rem;"
+                    hx-post="/settings/providers/{{ p.name }}/test"
+                    hx-target="#test-{{ p.name }}"
+                    hx-swap="innerHTML"
+                    hx-disabled-elt="this">Testar</button>
+            <form method="post" action="/settings/providers/{{ p.name }}/delete">
+              <button class="btn ghost" type="submit" style="padding:0.28rem 0.65rem; font-size:0.78rem;">Remover</button>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:var(--muted); margin:0;">Nenhum provedor API conectado ainda. Clique em <strong>+ Adicionar provedor</strong> acima.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Provedores por Assinatura (CLI Oficial)</h2>
+    <p style="color:var(--muted); font-size:0.84rem; margin-top:-0.3rem;">
+      Usa contas <strong>Claude Pro/Max</strong>, <strong>ChatGPT Plus/Pro</strong> ou <strong>Google AI</strong> autenticadas no CLI local da sua máquina.
+    </p>
+    <table class="list">
+      <tr><th>Plataforma</th><th>Status</th><th>Login oficial</th><th>Ações</th></tr>
+      {% for c in cli_providers %}
+      <tr>
+        <td><strong>{{ c.label }}</strong></td>
+        <td>
+          {% if c.installed %}
+            <span class="badge flag-ok mono">instalado ({{ c.executable }})</span>
+          {% else %}
+            <span class="badge mono">não encontrado no PATH</span>
+          {% endif %}
+          <span id="test-{{ c.name }}"></span>
+        </td>
+        <td class="mono" style="color:var(--muted); font-size:0.82rem;">{{ c.login_hint }}</td>
+        <td>
+          <div class="row-actions">
+            <form method="post" action="/settings/cli-providers/{{ c.name }}/activate">
+              <input type="hidden" name="scope" value="strong">
+              <button class="btn ghost" type="submit" style="padding:0.25rem 0.6rem; font-size:0.78rem;">Usar OP/Júri</button>
+            </form>
+            <form method="post" action="/settings/cli-providers/{{ c.name }}/activate">
+              <input type="hidden" name="scope" value="all">
+              <button class="btn ghost" type="submit" style="padding:0.25rem 0.6rem; font-size:0.78rem;">Usar em tudo</button>
+            </form>
+            <button class="btn ghost" type="button" style="padding:0.25rem 0.6rem; font-size:0.78rem;"
+                    hx-post="/settings/cli-providers/{{ c.name }}/test"
+                    hx-target="#test-{{ c.name }}"
+                    hx-swap="innerHTML"
+                    hx-disabled-elt="this">Testar CLI</button>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+</div>
+
+<!-- TAB 2: MODELOS & IA -->
+<div id="tab-models" class="koth-tab-panel {% if active_tab == 'models' %}active{% endif %}">
+  <section class="card">
+    <h2>Modelos do Orquestrador &amp; Especialistas</h2>
+    <p style="color:var(--muted); font-size:0.84rem; margin-top:-0.3rem;">
+      Ao trocar o provedor, os modelos disponíveis são detectados automaticamente.
+    </p>
+
+    <form method="post" action="/settings/models" style="display:grid; gap:0.9rem;">
+      <div class="provider-row">
+        <div class="row-actions" style="justify-content:space-between; align-items:center; margin-bottom:0.45rem;">
+          <strong>strong — OP, Júri e Planner</strong>
+          <button type="button" class="btn ghost" style="padding:0.22rem 0.55rem; font-size:0.76rem;"
+                  hx-get="/settings/models/options?role=strong"
+                  hx-include="[name='strong_provider']"
+                  hx-target="#strong-model-box"
+                  hx-swap="innerHTML">Sincronizar modelos</button>
+        </div>
+        <div class="form-grid">
+          <select name="strong_provider"
+                  hx-get="/settings/models/options?role=strong"
+                  hx-trigger="change"
+                  hx-include="this"
+                  hx-target="#strong-model-box"
+                  hx-swap="innerHTML">
+            {% for p in providers_status %}
+              <option value="{{ p.name }}" {% if models_cfg.roles.get('strong') and models_cfg.roles['strong'].provider == p.name %}selected{% endif %}>
+                {{ p.label }}{% if p.connected %} ✓{% endif %}
+              </option>
+            {% endfor %}
+            {% for c in cli_providers %}
+              <option value="{{ c.name }}" {% if models_cfg.roles.get('strong') and models_cfg.roles['strong'].provider == c.name %}selected{% endif %}>
+                {{ c.label }}{% if c.installed %} ✓{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <div id="strong-model-box">
+            {% set field_name = "strong_name" %}
+            {% set role = "strong" %}
+            {% set provider = models_cfg.roles['strong'].provider if models_cfg.roles.get('strong') else '' %}
+            {% set models = strong_models %}
+            {% set source = strong_src %}
+            {% set current = models_cfg.roles['strong'].name if models_cfg.roles.get('strong') else '' %}
+            {% include "_model_options.html" %}
+          </div>
+        </div>
+      </div>
+
+      <div class="provider-row">
+        <div class="row-actions" style="justify-content:space-between; align-items:center; margin-bottom:0.45rem;">
+          <strong>fast — Especialistas (Web, Pwn, Crypto, Reverse, Forensics, OSINT)</strong>
+          <button type="button" class="btn ghost" style="padding:0.22rem 0.55rem; font-size:0.76rem;"
+                  hx-get="/settings/models/options?role=fast"
+                  hx-include="[name='fast_provider']"
+                  hx-target="#fast-model-box"
+                  hx-swap="innerHTML">Sincronizar modelos</button>
+        </div>
+        <div class="form-grid">
+          <select name="fast_provider"
+                  hx-get="/settings/models/options?role=fast"
+                  hx-trigger="change"
+                  hx-include="this"
+                  hx-target="#fast-model-box"
+                  hx-swap="innerHTML">
+            {% for p in providers_status %}
+              <option value="{{ p.name }}" {% if models_cfg.roles.get('fast') and models_cfg.roles['fast'].provider == p.name %}selected{% endif %}>
+                {{ p.label }}{% if p.connected %} ✓{% endif %}
+              </option>
+            {% endfor %}
+            {% for c in cli_providers %}
+              <option value="{{ c.name }}" {% if models_cfg.roles.get('fast') and models_cfg.roles['fast'].provider == c.name %}selected{% endif %}>
+                {{ c.label }}{% if c.installed %} ✓{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <div id="fast-model-box">
+            {% set field_name = "fast_name" %}
+            {% set role = "fast" %}
+            {% set provider = models_cfg.roles['fast'].provider if models_cfg.roles.get('fast') else '' %}
+            {% set models = fast_models %}
+            {% set source = fast_src %}
+            {% set current = models_cfg.roles['fast'].name if models_cfg.roles.get('fast') else '' %}
+            {% include "_model_options.html" %}
+          </div>
+        </div>
+      </div>
+
+      <div class="provider-row">
+        <div class="row-actions" style="justify-content:space-between; align-items:center; margin-bottom:0.45rem;">
+          <strong>Fallback do strong (opcional)</strong>
+        </div>
+        <div class="form-grid">
+          <select name="fallback_provider"
+                  hx-get="/settings/models/options?role=fallback"
+                  hx-trigger="change"
+                  hx-include="this"
+                  hx-target="#fallback-model-box"
+                  hx-swap="innerHTML">
+            <option value="">(sem fallback)</option>
+            {% for p in providers_status %}
+              <option value="{{ p.name }}" {% if strong_fallback and strong_fallback.provider == p.name %}selected{% endif %}>
+                {{ p.label }}{% if p.connected %} ✓{% endif %}
+              </option>
+            {% endfor %}
+            {% for c in cli_providers %}
+              <option value="{{ c.name }}" {% if strong_fallback and strong_fallback.provider == c.name %}selected{% endif %}>
+                {{ c.label }}{% if c.installed %} ✓{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <div id="fallback-model-box">
+            {% set field_name = "fallback_name" %}
+            {% set role = "fallback" %}
+            {% set provider = strong_fallback.provider if strong_fallback else '' %}
+            {% set models = fallback_models %}
+            {% set source = fallback_src %}
+            {% set current = strong_fallback.name if strong_fallback else '' %}
+            {% include "_model_options.html" %}
+          </div>
+        </div>
+      </div>
+
+      <div class="row-actions">
+        <button class="btn" type="submit">Aplicar modelos</button>
+      </div>
+    </form>
+  </section>
+</div>
+
+<!-- TAB 3: SANDBOX & LIMITES -->
+<div id="tab-runtime" class="koth-tab-panel {% if active_tab == 'runtime' %}active{% endif %}">
+  <section class="card">
+    <h2>Limites do Planner (PL) &amp; Parada</h2>
+    <form method="post" action="/settings/limits" class="form-grid" style="max-width:520px; align-items:end;">
+      <label style="font-size:0.82rem; color:var(--muted);">
+        Máximo de dispatches (tentativas)
+        <input name="max_attempts" type="number" min="1" value="{{ agents_cfg.limits.get('max_attempts', 12) }}" required>
+      </label>
+      <label style="font-size:0.82rem; color:var(--muted);">
+        Timeout máximo (minutos)
+        <input name="max_minutes" type="number" min="1" value="{{ agents_cfg.limits.get('max_minutes', 60) }}" required>
+      </label>
+      <button class="btn" type="submit">Salvar limites</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="row-actions" style="justify-content:space-between; align-items:center; margin-bottom:0.65rem;">
+      <div>
+        <h2 style="margin-bottom:0.2rem;">Ferramentas &amp; Sandbox (Tool Doctor)</h2>
+        <p style="color:var(--muted); font-size:0.84rem; margin:0;">
+          Modo atual: <strong class="mono">{{ sandbox_mode }}</strong> · timeout <span class="mono">{{ tools_cfg.defaults.timeout_s }}s</span> · output max <span class="mono">{{ tools_cfg.defaults.output_limit_mb }} MB</span>
+        </p>
+      </div>
+      <div class="row-actions" style="align-items:center;">
+        <span id="docker-sandbox-status"></span>
+        <button class="btn ghost" type="button"
+                hx-post="/settings/sandbox/test"
+                hx-target="#docker-sandbox-status"
+                hx-swap="innerHTML"
+                hx-disabled-elt="this">Testar Docker</button>
+        <button class="btn ghost" type="button"
+                hx-post="/settings/sandbox/build"
+                hx-target="#docker-sandbox-status"
+                hx-swap="innerHTML"
+                hx-disabled-elt="this">Build Dockerfile.sandbox</button>
+      </div>
+    </div>
+
+    <form method="post" action="/settings/sandbox/mode" class="form-grid" style="margin-bottom:0.85rem; align-items:end;">
+      <label style="font-size:0.82rem; color:var(--muted);">
+        Backend de execução
+        <select name="mode">
+          <option value="native" {% if sandbox_mode == 'native' %}selected{% endif %}>native (ferramentas do host)</option>
+          <option value="docker" {% if sandbox_mode == 'docker' %}selected{% endif %}>docker (container isolado Kali)</option>
+        </select>
+      </label>
+      <label style="font-size:0.82rem; color:var(--muted);">
+        Imagem Docker
+        <input name="docker_image" value="{{ tools_cfg.defaults.docker_image }}" placeholder="koth-sandbox:latest">
+      </label>
+      <button class="btn" type="submit">Aplicar sandbox</button>
+    </form>
+
+    <table class="list">
+      <tr><th>Ferramenta</th><th>Modo</th><th>Guard</th><th>Status</th><th>Caminho</th></tr>
+      {% for t in tools_rows %}
+      <tr>
+        <td class="mono">{{ t.name }}</td>
+        <td class="mono">{{ t.mode }}</td>
+        <td class="mono">{{ tools_cfg.tools[t.name].guard }}</td>
+        <td>
+          {% if t.present %}
+            <span class="badge flag-ok">OK</span>
+          {% else %}
+            <span class="badge">ausente</span>
+          {% endif %}
+        </td>
+        <td class="mono" style="color:var(--muted); font-size:0.8rem;">{{ t.path or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Knowledge FTS5 (Arsenal &amp; Skills)</h2>
+    <div class="row-actions" style="align-items:center;">
+      <div id="knowledge-status">
+        {% set count = knowledge_count %}
+        {% include "_knowledge_status.html" %}
+      </div>
+      <button class="btn ghost"
+              hx-post="/settings/knowledge/rebuild"
+              hx-target="#knowledge-status"
+              hx-swap="innerHTML"
+              hx-disabled-elt="this">Reconstruir índice FTS5</button>
+    </div>
+  </section>
+</div>
+
+<!-- TAB 4: IDENTIDADE VISUAL -->
+<div id="tab-brand" class="koth-tab-panel {% if active_tab == 'brand' %}active{% endif %}">
+  <section class="card">
+    <h2>Identidade Visual KOTH</h2>
+    <p style="color:var(--muted); font-size:0.85rem;">Ativos visuais ativos no sistema:</p>
+    <div class="brand-grid">
+      <div class="brand-option">
+        <img src="/static/brand/koth_crest_3.jpg" alt="Logo Oficial — Brasão Topográfico CLI">
+        <strong class="mono">Logo Oficial — Brasão Topográfico &gt;_</strong>
+      </div>
+      <div class="brand-option">
+        <img src="/static/brand/koth_ascii_bg.jpg" alt="Fundo do Sistema — Alpinista Cyber ASCII">
+        <strong class="mono">Fundo do Sistema — Alpinista ASCII</strong>
+      </div>
+      <div class="brand-option">
+        <img src="/static/brand/koth_hero_2.jpg" alt="Hero README — Alpinista Cyber-Tático">
+        <strong class="mono">README / Hero — Alpinista Cyber-Tático</strong>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+function kothSwitchTab(name, btn) {
+  document.querySelectorAll('.koth-tab-panel').forEach(function (p) { p.classList.remove('active'); });
+  document.querySelectorAll('.koth-tab').forEach(function (b) { b.classList.remove('active'); });
+  var panel = document.getElementById('tab-' + name);
+  if (panel) { panel.classList.add('active'); }
+  if (btn) { btn.classList.add('active'); }
+}
+
+function kothUpdateAddDefaults(sel) {
+  var opt = sel.options[sel.selectedIndex];
+  var urlInput = document.getElementById('add-provider-url');
+  var keyInput = document.getElementById('add-provider-key');
+  if (urlInput) {
+    urlInput.value = opt.getAttribute('data-url') || '';
+    urlInput.readOnly = (sel.value === 'google');
+  }
+  if (keyInput) {
+    var req = opt.getAttribute('data-req') === '1';
+    var envName = opt.getAttribute('data-env') || 'API_KEY';
+    keyInput.placeholder = req ? ('Cole a API Key (' + envName + ')…') : 'Opcional para Ollama local';
+  }
+}
+
+function kothModelSelectChange(fieldName, sel) {
+  var inp = document.getElementById(fieldName + '-input');
+  if (!inp) return;
+  if (sel.value === '__custom__') {
+    inp.style.display = 'block';
+    inp.value = '';
+    inp.focus();
+  } else {
+    inp.style.display = 'none';
+    inp.value = sel.value;
+  }
+}
+</script>
+{% endblock %}

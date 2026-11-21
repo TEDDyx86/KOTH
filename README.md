@@ -1,13 +1,22 @@
-# CTF Orchestrator
+# KOTH — King Of The Hill
+
+<p align="center">
+  <img src="app/static/brand/koth_crest_3.jpg" alt="KOTH Crest" width="140">
+</p>
+
+![KOTH — Cyber Alpinist](app/static/brand/koth_hero_2.jpg)
 
 Framework orquestrador especialista em CTF, para um único operador, rodando como app web local
-(**FastAPI + HTMX + SQLite**). Ele cobre o ciclo de vida de um desafio do início ao fim:
+(**FastAPI + HTMX + SQLite**), com **tela inicial estilo CLI** para conversar diretamente com o
+Orquestrador (`[KOTH // OP]`), lançar desafios em **Full Auto** ou **Supervisionado** e escalar
+até a flag. Ele cobre o ciclo de vida de um desafio do início ao fim:
 
+- **Terminal OP (`/`)**: chat estilo CLI para enviar desafios com anexos, rodar `/solve`, `/rank`, `/status`, `/events`;
 - **tracking** de eventos, challenges, tentativas, notas e artefatos;
-- **execução de ferramentas** em sandbox com allowlist, guard de alvo e timeout;
+- **execução de ferramentas** em sandbox com allowlist, guard de alvo, staging de anexos e timeout;
 - **conhecimento embutido** (skills e Arsenal de CTF indexados em FTS5);
-- **agentes de IA** (orquestrador, planejador, recon, júri e especialistas por categoria)
-  com **checkpoint humano obrigatório** antes de qualquer ataque.
+- **agentes de IA** (OP, Planner, Recon, Júri e 6 especialistas por categoria, com Forensics multimodal)
+  em modo **Full Auto** ou com **checkpoint humano** por ciclo.
 
 Decisão de produto central: **o framework é o host dos agentes**. Ele monta o prompt, injeta o
 conhecimento, aplica o checkpoint, chama o LLM direto e grava tudo no tracking. Não existe
@@ -29,21 +38,15 @@ dependência de MCP, de plataforma de CTF ou de orquestrador externo.
 | 5. Agent Runtime | ✅ implementado (loop + checkpoint) | `app/agents/` |
 | Painel do Agente (UI §9) | ✅ implementado | `app/web/agent_routes.py`, `app/web/templates/agent_panel.html` |
 
-**Suíte de testes:** 122 testes passando (`python -m pytest tests -q`).
+**Suíte de testes:** 148 testes passando (`python -m pytest tests -q`).
 
 Prova de funcionamento ponta a ponta: o challenge **#2 (`IDP - Sorteios Especiais`)** foi
 resolvido pelo fluxo real (RNG semeado pelo unix epoch, bola 42 → `Random(seed).Next() % 1000 + 1`).
 
-### O que ainda não existe (backlog acordado)
+### O que ainda falta no backlog
 
-- Persistir sessões de agente no banco (hoje vivem em memória e somem no restart do servidor).
-- Retry automático quando o provider NIM devolve 503.
-- Enforçar `limits.max_attempts` / `limits.max_minutes` (hoje são carregados e ignorados).
-- Wiring do `planner.py` no loop do orquestrador.
-- Endpoint de inventário de ferramentas (`Tool Doctor` existe como módulo, falta expor).
-- Decompilador .NET / Ghidra / pwntools na allowlist; sandbox Docker/Kali.
-- Providers extras (Anthropic/OpenAI/9router já declarados em `config/models.yaml`, sem uso ainda).
-- UI de configurações (aba Agents/Tools).
+- UI de edição avançada de personas diretamente pelo navegador (hoje editáveis em `agents/personas/*.md`).
+- Retry automático dedicado no cliente HTTP além do fallback de modelo por erro transitório.
 
 Detalhes em [`docs/DESENVOLVIMENTO.md`](docs/DESENVOLVIMENTO.md#dívida-técnica-conhecida).
 
@@ -51,76 +54,48 @@ Detalhes em [`docs/DESENVOLVIMENTO.md`](docs/DESENVOLVIMENTO.md#dívida-técnica
 
 ## Requisitos
 
-- **Python 3.12+** (o ambiente validado roda 3.14).
-- **Windows** nesta fase (o ToolRunner usa `CREATE_NO_WINDOW` e caminhos nativos). Linux/macOS
-  funcionam para o tracking e os agentes, mas o sandbox de ferramentas não foi validado.
-- Ferramentas no `PATH` conforme `config/tools.yaml`: `nmap`, `ncat`, `curl`, `strings`, `gdb`,
-  `objdump`, `sqlmap`, `python`.
-- Uma chave de API da **NVIDIA** (`NVIDIA_API_KEY`) para o Agent Runtime.
+- **Python 3.12+** (Windows, Linux ou macOS).
+- **Ferramentas:** você pode usar **Docker** com o [`Dockerfile.sandbox`](Dockerfile.sandbox) incluído (recomendado para portabilidade e isolamento) **ou** ferramentas nativas no `PATH` (`nmap`, `ncat`, `curl`, `strings`, `gdb`, `objdump`, `sqlmap`, `python`).
+- **IA (qualquer uma das opções):**
+  - API key de um provedor suportado (**NVIDIA NIM**, **OpenAI**, **Anthropic**, **Google Gemini**, **OpenRouter**, **Groq**, **DeepSeek**, **Ollama local** ou **Custom/9router**) — configurável direto na UI em `/settings`; **ou**
+  - **CLI oficial autenticado** na sua máquina (`claude` para Claude Pro/Max, `codex` para ChatGPT Plus/Pro, ou `gemini` para Google AI).
 
 ---
 
-## Instalação
+## Instalação e execução rápida
 
-```powershell
-cd "C:\Users\Administrator\Documents\GitHub\CTF FRAMEWORK"
+```bash
+git clone https://github.com/TEDDyx86/KOTH.git
+cd KOTH
 python -m pip install -e .
+koth
 ```
 
-Dependências principais: `fastapi`, `uvicorn[standard]`, `sqlmodel`, `jinja2`,
-`python-multipart`, `pydantic`, `pyyaml`, `pydantic-ai-slim[openai]`.
-Para testes: `python -m pip install -e .[dev]` (pytest + httpx).
+O comando `koth` sobe o servidor em `http://127.0.0.1:8777/` e abre o navegador automaticamente (use `koth serve --no-browser` para modo headless ou `koth doctor` para diagnosticar ferramentas, Docker e provedores).
 
-### Chave do modelo
+Para testes:
 
-O runtime lê a chave da variável de ambiente declarada em `config/models.yaml`
-(`NVIDIA_API_KEY` para o provider `nvidia`). Se você guarda a chave no `auth.json` do OpenCode:
-
-```powershell
-$env:NVIDIA_API_KEY = (Get-Content "$env:USERPROFILE\.local\share\opencode\auth.json" -Raw |
-  ConvertFrom-Json).nvidia.key
+```bash
+python -m pip install -e .[dev]
+python -m pytest tests -q
 ```
 
-Sem a chave, a UI continua funcionando: o painel mostra `idle` e o botão **Iniciar agente**
-retorna 503 com a mensagem do provider indisponível.
+### Sandbox Docker (opcional, recomendado)
 
----
-
-## Rodar
-
-```powershell
-python -m uvicorn app.main:app --port 8777
+```bash
+docker build -t koth-sandbox:latest -f Dockerfile.sandbox .
 ```
 
-Ou dê duplo clique em `iniciar_orchestrator.bat` (sobe em `http://127.0.0.1:8000`, valida Python
-e dependências antes).
-
-Abra `http://127.0.0.1:8777/`. O banco (`ctf.db`) e o `storage/` são criados no primeiro acesso.
+Depois ative o modo `docker` em **Configurações → Sandbox & Limites** (`/settings?tab=runtime`).
 
 ---
 
 ## Fluxo de uso
 
-1. **Dashboard (`/`)** — cria um evento (ex.: `IDP CTF 03`).
-2. **Evento (`/events/{id}`)** — cadastra o challenge: título, categoria, pontos, dificuldade,
-   descrição, `target` (`host:porta`) e tags. O `target` é o campo de segurança: o ToolRunner só
-   executa contra ele.
-3. **Challenge (`/challenges/{id}`)** — anexa arquivos do desafio (`type=download`), registra
-   tentativas manuais e notas versionadas.
-4. **Painel do Agente (`/challenges/{id}/agent`)** — clica em **Iniciar agente**. O framework roda
-   o recon determinístico (strings nos anexos, nmap no target), chama o júri e **para no
-   checkpoint**.
-5. **Checkpoint** — três ações:
-   - **Aprovar** → executa o próximo passo decidido pelo júri (despacha um especialista ou valida
-     a flag). Um ciclo completo pode levar minutos.
-   - **Rejeitar** → encerra a sessão de vez (`state=rejected`).
-   - **Ajustar com instrução** → injeta sua orientação e pede uma nova decisão ao júri.
-6. **Registrar flag** — cola a flag no card lateral. O framework valida o regex do evento
-   (`IDP\{.*\}`, `CTF\{.*\}` etc.) e duplicidade, marca o challenge como `solved` e mostra o
-   resultado. A submissão na plataforma é sua.
-
-O feed do painel atualiza por **polling HTMX a cada 1,5 s** (dois parciais independentes). Não há
-SSE nem WebSocket nesta fase.
+1. **Terminal OP (`/`)** — tela inicial em formato CLI para conversar com o Orquestrador (`[KOTH // OP]`), colar o enunciado do desafio com anexos ou usar `/solve`, `/rank`, `/events`, `/status`, `/help`.
+2. **Dashboard (`/dashboard`)** — criação rápida de desafios em 1 passo (com upload múltiplo e botão **Criar e rodar Full Auto →**), progresso dos eventos e atividade recente.
+3. **Painel do Agente (`/challenges/{id}/agent`)** — acompanha o loop em **Full Auto** (sem pausa) ou **Supervisionado** (checkpoint humano com **Aprovar**, **Aprovar + Full Auto**, **Ajustar** e **Rejeitar**), além de validação manual da flag.
+4. **Configurações (`/settings`)** — 4 abas: **Provedores & Auth** (API keys locais + CLIs de assinatura), **Modelos & IA** (descoberta automática de modelos por provedor), **Sandbox & Limites** (Docker/Native + Planner + Knowledge FTS5) e **Identidade Visual**.
 
 ---
 
@@ -170,7 +145,7 @@ agents/personas/     # personas .md (op, planner, recon, jury, submission)
 config/              # agents.yaml, models.yaml, tools.yaml
 knowledge/           # repos vendorizados (ctf-skills, dispatch) + knowledge.lock
 scripts/             # smoke tests, sync de knowledge, CLI de busca
-tests/               # 122 testes (pytest)
+tests/               # 148 testes (pytest)
 docs/                # specs, plans e esta documentação
 ctf.db               # banco local (gitignored)
 storage/             # anexos, outputs de tools e sandbox (gitignored)

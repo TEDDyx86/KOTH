@@ -12,6 +12,15 @@
     <ul>{% for f in sess.findings %}<li class="mono">{{ f }}</li>{% endfor %}</ul>
   </div>
   {% endif %}
+  {% if sess.final_report %}
+  <div class="findings">
+    <h4>Relatório Final (OP) — {{ sess.final_report.status }}</h4>
+    {% if sess.final_report.flag_candidate %}
+    <p class="mono" style="color: var(--flag-ok);">flag: {{ sess.final_report.flag_candidate }}</p>
+    {% endif %}
+    <ul>{% for item in sess.final_report.attempts_summary %}<li class="mono">{{ item }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
   {% if sess.pending_decision %}
   <p class="mono" style="color: var(--warning);">
     próximo passo (júri): {{ sess.pending_decision.action }} — {{ sess.pending_decision.reason }}

@@ -1,0 +1,25 @@
+FROM kalilinux/kali-rolling
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nmap \
+    ncat \
+    curl \
+    binutils \
+    gdb \
+    sqlmap \
+    python3 \
+    python3-pip \
+    file \
+    binwalk \
+    libimage-exiftool-perl \
+    ca-certificates \
+  && pip3 install --no-cache-dir --break-system-packages \
+    pwntools \
+    pycryptodome \
+    requests \
+  && ln -sf /usr/bin/python3 /usr/bin/python \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work

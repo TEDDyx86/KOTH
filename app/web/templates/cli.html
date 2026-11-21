@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}KOTH — Terminal OP{% endblock %}
+{% block main_class %}cli-mode{% endblock %}
+{% block content %}
+<div class="cli-shell">
+  <header class="cli-banner">
+    <div class="cli-banner-content">
+      <div>
+        <h1>
+          <span class="mono" style="color: var(--accent-bright);">&gt;_</span>
+          <span>KOTH // Terminal do Orquestrador</span>
+        </h1>
+        <p>Converse com o OP, cole enunciados de desafios ou anexe arquivos para escalar direto rumo à flag.</p>
+      </div>
+      <div class="cli-shortcuts">
+        <button type="button" class="cli-chip mono" onclick="kothRunCmd('/rank')">/rank</button>
+        <button type="button" class="cli-chip mono" onclick="kothRunCmd('/events')">/events</button>
+        <button type="button" class="cli-chip mono" onclick="kothRunCmd('/status')">/status</button>
+        <button type="button" class="cli-chip mono" onclick="kothRunCmd('/help')">/help</button>
+        <button type="button" class="cli-chip mono" onclick="kothRunCmd('/clear')">/clear</button>
+      </div>
+    </div>
+  </header>
+
+  <section id="cli-feed" class="cli-feed-wrap"
+           hx-get="/cli/feed"
+           hx-trigger="every 2s [document.querySelector('#cli-feed [data-running=\'1\']')]"
+           hx-swap="innerHTML">
+    {% include "_cli_feed.html" %}
+  </section>
+
+  <footer class="cli-composer">
+    <form id="cli-form" class="cli-composer-box"
+          hx-post="/cli/message"
+          hx-target="#cli-feed"
+          hx-swap="innerHTML"
+          hx-encoding="multipart/form-data"
+          hx-on::after-request="if(event.detail.successful){ this.reset(); document.getElementById('cli-file-label').textContent='Anexar arquivos'; var f=document.getElementById('cli-feed'); f.scrollTop=f.scrollHeight; }">
+      <div class="cli-input-row">
+        <span class="cli-prompt-sigil mono">koth@summit:~$</span>
+        <textarea id="cli-input" name="message"
+                  placeholder="Fale com o OP, cole o desafio ou digite /solve Título | cat=web | target=host:porta | descrição…"
+                  onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); this.form.requestSubmit(); }"></textarea>
+      </div>
+      <div class="cli-toolbar">
+        <div class="cli-toolbar-left">
+          <select name="event_id" title="Evento ativo">
+            {% for ev in event_list %}
+              <option value="{{ ev.id }}" {% if active_event and active_event.id == ev.id %}selected{% endif %}>{{ ev.name }}</option>
+            {% else %}
+              <option value="">KOTH Arena (auto)</option>
+            {% endfor %}
+          </select>
+          <select name="mode" title="Modo de execução">
+            <option value="auto" selected>Full Auto</option>
+            <option value="supervised">Supervisionado</option>
+          </select>
+          <label class="btn ghost cli-file-btn">
+            <span id="cli-file-label">Anexar arquivos</span>
+            <input type="file" name="files" multiple
+                   onchange="document.getElementById('cli-file-label').textContent = this.files.length ? (this.files.length + ' arquivo(s)') : 'Anexar arquivos'">
+          </label>
+          <label class="cli-toggle">
+            <input type="checkbox" name="force_launch" value="true">
+            <span>Lançar direto como desafio</span>
+          </label>
+        </div>
+        <div class="row-actions" style="align-items:center;">
+          <span id="cli-spinner" class="htmx-indicator mono" style="color:var(--warning); font-size:0.8rem;">escalando…</span>
+          <button class="btn" type="submit" hx-indicator="#cli-spinner" hx-disabled-elt="this">Enviar</button>
+        </div>
+      </div>
+    </form>
+  </footer>
+</div>
+
+<script>
+function kothRunCmd(cmd) {
+  var inp = document.getElementById('cli-input');
+  var form = document.getElementById('cli-form');
+  if (inp && form) {
+    inp.value = cmd;
+    form.requestSubmit();
+  }
+}
+document.addEventListener('DOMContentLoaded', function () {
+  var feed = document.getElementById('cli-feed');
+  if (feed) { feed.scrollTop = feed.scrollHeight; }
+});
+document.body.addEventListener('htmx:afterSwap', function (evt) {
+  if (evt.detail.target && evt.detail.target.id === 'cli-feed') {
+    evt.detail.target.scrollTop = evt.detail.target.scrollHeight;
+  }
+});
+</script>
+{% endblock %}

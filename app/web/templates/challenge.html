@@ -1,21 +1,34 @@
 {% extends "base.html" %}
-{% block title %}{{ challenge.title }} — CTF Orchestrator{% endblock %}
+{% block title %}{{ challenge.title }} — KOTH{% endblock %}
 {% block content %}
 <h1>{{ challenge.title }}
   <span class="badge {{ 'solved' if challenge.status.value == 'solved' else '' }}">{{ challenge.status.value }}</span>
   {% if challenge.flag %}<span class="badge flag-ok mono">{{ challenge.flag }}</span>{% endif %}
 </h1>
-<p class="mono" style="color: var(--muted);">
-  {{ challenge.category }} · {{ challenge.points }} pts ·
-  {% if challenge.target %}target: {{ challenge.target }} · {% endif %}
-  {{ summary.attempt_count }} tentativas
-  {% if summary.active_seconds is not none %} · {{ (summary.active_seconds / 60) | round(1) }} min ativos{% endif %}
-  · <a href="/challenges/{{ challenge.id }}/agent">painel do agente</a>
-</p>
+<div class="row-actions" style="justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+  <p class="mono" style="color: var(--muted); margin: 0;">
+    {{ challenge.category }} · {{ challenge.points }} pts
+    {% if challenge.difficulty %} · {{ challenge.difficulty.value }}{% endif %}
+    {% if challenge.target %} · target: {{ challenge.target }}{% endif %}
+    · {{ summary.attempt_count }} tentativas
+    {% if summary.active_seconds is not none %} · {{ (summary.active_seconds / 60) | round(1) }} min ativos{% endif %}
+  </p>
+  <a class="btn" href="/challenges/{{ challenge.id }}/agent">Abrir Painel do Agente →</a>
+</div>
 
 <section class="card">
   <h2>Descrição</h2>
   <pre style="white-space: pre-wrap;">{{ challenge.description or "—" }}</pre>
+  <details style="margin-top:0.75rem;">
+    <summary style="color: var(--muted); cursor: pointer;">Editar challenge (target, categoria, descrição…)</summary>
+    <form method="post" action="/challenges/{{ challenge.id }}/edit" style="display:grid; gap:0.6rem; margin-top:0.75rem;">
+      {% set ch = challenge %}
+      {% include "_challenge_fields.html" %}
+      <div class="row-actions">
+        <button class="btn ghost" type="submit">Salvar alterações</button>
+      </div>
+    </form>
+  </details>
 </section>
 
 <section class="card">
@@ -27,8 +40,8 @@
       <li style="color: var(--muted);">Nenhum anexo.</li>
     {% endfor %}
   </ul>
-  <form method="post" action="/challenges/{{ challenge.id }}/attachments" enctype="multipart/form-data" style="display:flex; gap:0.5rem; max-width:520px;">
-    <input type="file" name="file" required>
+  <form method="post" action="/challenges/{{ challenge.id }}/attachments" enctype="multipart/form-data" style="display:flex; gap:0.5rem; max-width:560px;">
+    <input type="file" name="files" multiple required>
     <select name="type" style="width:auto;">
       <option value="screenshot">screenshot</option>
       <option value="download" selected>download</option>

@@ -1,9 +1,25 @@
 {% extends "base.html" %}
-{% block title %}{{ event.name }} — CTF Orchestrator{% endblock %}
+{% block title %}{{ event.name }} — KOTH{% endblock %}
 {% block content %}
-<h1>{{ event.name }} <span class="badge">{{ event.status.value }}</span></h1>
+<h1>{{ event.name }}
+  <span class="badge">{{ event.status.value }}</span>
+  {% if event.flag_format %}<small class="mono" style="color: var(--muted); font-size:0.9rem;">{{ event.flag_format }}</small>{% endif %}
+</h1>
 
-<form method="get" action="/events/{{ event.id }}" style="display:flex; gap:0.5rem; max-width:640px; margin-bottom:1rem;">
+<section class="card">
+  <h2>+ Novo challenge</h2>
+  <form method="post" action="/events/{{ event.id }}/challenges" enctype="multipart/form-data" style="display:grid; gap:0.6rem;">
+    {% set ch = none %}
+    {% include "_challenge_fields.html" %}
+    <div class="row-actions">
+      <button class="btn" type="submit" name="go_to" value="agent_auto">Criar e rodar Full Auto →</button>
+      <button class="btn ghost" type="submit" name="go_to" value="agent">Criar e abrir Agente</button>
+      <button class="btn ghost" type="submit" name="go_to" value="challenge">Criar e ver página</button>
+    </div>
+  </form>
+</section>
+
+<form method="get" action="/events/{{ event.id }}" style="display:flex; gap:0.5rem; max-width:760px; margin-bottom:1rem;">
   <select name="category">
     <option value="">todas categorias</option>
     {% for cat in ["pwn","web","crypto","reverse","forensics","osint","misc","ai-ml","custom"] %}
@@ -16,40 +32,28 @@
       <option value="{{ st }}" {% if status == st %}selected{% endif %}>{{ st }}</option>
     {% endfor %}
   </select>
+  <select name="sort">
+    <option value="">ordem padrão</option>
+    <option value="planner" {% if sort == "planner" %}selected{% endif %}>prioridade do Planner</option>
+  </select>
   <button class="btn ghost" type="submit">Filtrar</button>
 </form>
 
 <table class="list">
-  <tr><th>Título</th><th>Categoria</th><th>Pontos</th><th>Dificuldade</th><th>Status</th></tr>
+  <tr><th>Título</th><th>Categoria</th><th>Pontos</th><th>Dificuldade</th><th>PL</th><th>Status</th><th></th></tr>
   {% for c in challenges %}
     <tr>
       <td><a href="/challenges/{{ c.id }}">{{ c.title }}</a></td>
       <td>{{ c.category }}</td>
       <td>{{ c.points }}</td>
       <td>{{ c.difficulty.value if c.difficulty else "—" }}</td>
+      <td class="mono" style="color: var(--muted); font-size:0.85rem;">{{ scores.get(c.id, "—") }}</td>
       <td><span class="badge {{ 'solved' if c.status.value == 'solved' else '' }}">{{ c.status.value }}</span>
           {% if c.flag %}<span class="badge flag-ok mono">flag ok</span>{% endif %}</td>
+      <td><a class="btn ghost" style="padding:0.2rem 0.6rem; font-size:0.8rem;" href="/challenges/{{ c.id }}/agent">Agente →</a></td>
     </tr>
   {% else %}
-    <tr><td colspan="5" style="color: var(--muted);">Nenhum challenge com esses filtros.</td></tr>
+    <tr><td colspan="7" style="color: var(--muted);">Nenhum challenge com esses filtros.</td></tr>
   {% endfor %}
 </table>
-
-<details class="card" style="margin-top:1rem;">
-  <summary>+ Novo challenge</summary>
-  <form method="post" action="/events/{{ event.id }}/challenges" style="display:grid; gap:0.5rem; max-width:640px; margin-top:1rem;">
-    <input name="title" placeholder="Título" required>
-    <select name="category">
-      {% for cat in ["pwn","web","crypto","reverse","forensics","osint","misc","ai-ml","custom"] %}
-        <option value="{{ cat }}">{{ cat }}</option>
-      {% endfor %}
-    </select>
-    <input name="points" type="number" placeholder="Pontos" value="100">
-    <input name="difficulty" placeholder="Dificuldade (easy/medium/hard/insane)">
-    <input name="target" placeholder="host:porta (target autorizado)">
-    <input name="tags" placeholder="tags separadas por vírgula">
-    <textarea name="description" placeholder="Descrição (Markdown)"></textarea>
-    <button class="btn" type="submit">Criar challenge</button>
-  </form>
-</details>
 {% endblock %}

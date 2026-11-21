@@ -1,0 +1,23 @@
+{% if not provider %}
+  <input name="{{ field_name }}" value="" placeholder="(sem fallback)" disabled>
+{% else %}
+  {% set selected_val = current if (current and current in models) else (models[0] if models else current) %}
+  <div style="display:grid; gap:0.35rem;">
+    <select id="{{ field_name }}-select"
+            onchange="kothModelSelectChange('{{ field_name }}', this)">
+      {% for m in models %}
+        <option value="{{ m }}" {% if selected_val == m %}selected{% endif %}>{{ m }}</option>
+      {% endfor %}
+      <option value="__custom__" {% if current and current not in models %}selected{% endif %}>Outro modelo (digitar)…</option>
+    </select>
+    <input id="{{ field_name }}-input"
+           name="{{ field_name }}"
+           value="{{ current or selected_val or '' }}"
+           placeholder="ID do modelo"
+           {% if not (current and current not in models) and models %}style="display:none;"{% endif %}
+           {% if role != 'fallback' %}required{% endif %}>
+    {% if source %}
+      <small class="mono" style="color:var(--muted); font-size:0.8rem;">origem: {{ source }} ({{ models | length }} modelos)</small>
+    {% endif %}
+  </div>
+{% endif %}

@@ -1,7 +1,8 @@
+import os
 import re
 from dataclasses import dataclass
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from ..models import Attempt, AttemptResult, AttemptType, Challenge, Event
 from ..services import tracking
@@ -22,20 +23,20 @@ def validate_flag(session: Session, challenge: Challenge, flag_candidate: str) -
     the framework never calls a platform API."""
     event = session.get(Event, challenge.event_id)
     pattern = (event.flag_format if event and event.flag_format
-               else DEFAULT_FLAG_FORMAT)
+               else os.environ.get("CTF_FLAG_FORMAT") or DEFAULT_FLAG_FORMAT)
 
     if not re.fullmatch(pattern, flag_candidate or ""):
-        result = tracking.record_attempt(
+        tracking.record_attempt(
             session, challenge.id, AttemptType.submission,
             "flag rejected (format)", AttemptResult.failed,
             tool_command=flag_candidate, learning="does not match event flag_format")
         return SubmissionResult(accepted=False,
                                 reason=f"flag does not match format {pattern!r}")
 
-    duplicates = session.query(Attempt).filter(
+    duplicates = list(session.exec(select(Attempt).where(
         Attempt.challenge_id == challenge.id,
         Attempt.type == AttemptType.submission,
-        Attempt.tool_command == flag_candidate).all()
+        Attempt.tool_command == flag_candidate)).all())
     if duplicates:
         result = tracking.record_attempt(
             session, challenge.id, AttemptType.submission,

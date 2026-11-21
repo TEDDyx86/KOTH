@@ -1,8 +1,9 @@
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 
-from ..models import Attempt, Challenge
-from .context import jury_context, specialist_context
-from .payloads import JuryDecision, SpecialistReport, TaskOrder
+from ..models import Challenge
+from .context import jury_context
+from .models import run_with_fallback
+from .payloads import JuryDecision, SpecialistReport
 
 
 def _render_reports(reports: list[SpecialistReport]) -> str:
@@ -15,9 +16,27 @@ def _render_reports(reports: list[SpecialistReport]) -> str:
     return "\n".join(lines)
 
 
+def _extract_usage(result) -> dict | None:
+    try:
+        u = result.usage
+    except Exception:
+        return None
+    if u is None:
+        return None
+    return {
+        "input_tokens": getattr(u, "input_tokens", None) or getattr(u, "request_tokens", 0) or 0,
+        "output_tokens": getattr(u, "output_tokens", None) or getattr(u, "response_tokens", 0) or 0,
+        "total_tokens": getattr(u, "total_tokens", 0) or 0,
+    }
+
+
 class JuryAgent:
-    def __init__(self, model, persona_text: str) -> None:
+    def __init__(self, model, persona_text: str,
+                 fallback_models: list | None = None) -> None:
+        self.persona_text = persona_text
+        self.models = [model, *(fallback_models or [])]
         self.agent = Agent(model, output_type=JuryDecision, system_prompt=persona_text)
+        self.last_usage: dict | None = None
 
     def decide(self, session, challenge: Challenge,
                reports: list[SpecialistReport],
@@ -28,5 +47,12 @@ class JuryAgent:
         )
         if extra_feedback:
             prompt += f"\n## Operator feedback (reject/adjust)\n{extra_feedback}\n"
-        result = self.agent.run_sync(prompt)
+
+        def _call(m):
+            ag = self.agent if m is self.models[0] else Agent(
+                m, output_type=JuryDecision, system_prompt=self.persona_text)
+            return ag.run_sync(prompt)
+
+        result = run_with_fallback(self.models, _call)
+        self.last_usage = _extract_usage(result)
         return result.output

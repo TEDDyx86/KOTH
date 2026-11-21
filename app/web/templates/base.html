@@ -1,19 +1,96 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}CTF Orchestrator{% endblock %}</title>
+  <title>{% block title %}KOTH — King Of The Hill{% endblock %}</title>
+  <link rel="icon" type="image/jpeg" href="/static/brand/koth_crest_3.jpg">
   <link rel="stylesheet" href="/static/theme.css">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
 </head>
 <body>
-  <header class="topbar">
-    <a href="/" class="brand">CTF Orchestrator</a>
-    <span style="color: var(--muted); font-size: 0.85rem;">solo / local</span>
-  </header>
-  <main>
-    {% block content %}{% endblock %}
-  </main>
+  <div class="koth-mobile-bar">
+    <a href="/" style="display:flex; align-items:center; gap:0.5rem; color:var(--text); font-weight:700; letter-spacing:0.1em;">
+      <img src="/static/brand/koth_crest_3.jpg" alt="KOTH" style="width:28px; height:28px; border-radius:6px; object-fit:cover;">
+      KOTH
+    </a>
+    <button class="btn ghost" type="button" onclick="document.getElementById('koth-sidebar').classList.toggle('open')">Menu</button>
+  </div>
+
+  <div class="koth-shell">
+    <aside id="koth-sidebar" class="koth-sidebar">
+      <a href="/" class="koth-brand">
+        <img src="/static/brand/koth_crest_3.jpg" alt="KOTH — King Of The Hill">
+        <div class="koth-brand-title">
+          <strong>KOTH</strong>
+          <span>King Of The Hill</span>
+        </div>
+      </a>
+
+      <nav class="koth-nav-group" aria-label="Principal">
+        <span class="koth-nav-label">Comando</span>
+        <a href="/" class="koth-nav-link {% if active_nav == 'cli' %}active{% endif %}">
+          <span class="koth-nav-link-main">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+            <span>Terminal OP</span>
+          </span>
+          <span class="koth-nav-sub mono">CLI</span>
+        </a>
+        <a href="/dashboard" class="koth-nav-link {% if active_nav == 'dashboard' %}active{% endif %}">
+          <span class="koth-nav-link-main">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"></rect><rect x="14" y="3" width="7" height="5" rx="1"></rect><rect x="14" y="12" width="7" height="9" rx="1"></rect><rect x="3" y="16" width="7" height="5" rx="1"></rect></svg>
+            <span>Dashboard</span>
+          </span>
+        </a>
+        <a href="/settings" class="koth-nav-link {% if active_nav == 'settings' %}active{% endif %}">
+          <span class="koth-nav-link-main">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            <span>Configurações</span>
+          </span>
+        </a>
+      </nav>
+
+      <div class="koth-nav-group">
+        <span class="koth-nav-label">Eventos</span>
+        {% for ev, solved, total in (nav_events or []) %}
+          <a href="/events/{{ ev.id }}" class="koth-nav-link {% if active_nav == 'event-' ~ ev.id %}active{% endif %}">
+            <span class="koth-nav-link-main">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
+              <span>{{ ev.name }}</span>
+            </span>
+            <span class="koth-nav-sub mono tabular">{{ solved }}/{{ total }}</span>
+          </a>
+        {% else %}
+          <span style="padding:0.25rem 0.6rem; font-size:0.8rem; color:var(--muted);">Nenhum evento</span>
+        {% endfor %}
+      </div>
+
+      {% if not (active_nav or '').startswith('event-') %}
+      <div class="koth-nav-group">
+        <span class="koth-nav-label">Desafios abertos</span>
+        {% for c in (nav_open_challenges or [])[:12] %}
+          <a href="/challenges/{{ c.id }}/agent" class="koth-nav-link {% if active_nav == 'challenge-' ~ c.id %}active{% endif %}">
+            <span class="koth-nav-link-main">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3z"></path></svg>
+              <span>{{ c.title }}</span>
+            </span>
+            <span class="koth-nav-sub mono tabular">{{ c.points }}</span>
+          </a>
+        {% else %}
+          <span style="padding:0.25rem 0.6rem; font-size:0.8rem; color:var(--muted);">Nenhuma escalada ativa</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="koth-sidebar-footer">
+        <span><span class="koth-dot"></span>OP ativo</span>
+        <span class="mono">KOTH // v1</span>
+      </div>
+    </aside>
+
+    <main class="koth-main {% block main_class %}{% endblock %}">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
 </body>
 </html>

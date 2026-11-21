@@ -176,7 +176,7 @@ não erro 503 em runtime — isso está no backlog.
 
 ## 6. Checklist antes do merge
 
-- [ ] `python -m pytest tests -q` verde (122+)
+- [ ] `python -m pytest tests -q` verde (148+)
 - [ ] teste novo cobre o comportamento adicionado (TDD real, não teste retroativo)
 - [ ] nenhum caminho absoluto, nenhuma chave/segredo no código
 - [ ] `config/*.yaml` válido (`python -c "import yaml;yaml.safe_load(open(...))"`)
@@ -188,45 +188,22 @@ não erro 503 em runtime — isso está no backlog.
 
 ## 7. Dívida técnica conhecida
 
-| # | Problema | Onde | Impacto | Correção sugerida |
-|---|---|---|---|---|
-| 1 | `ChallengeStatus.in_progress` não existe, mas o recon atribui | `app/agents/recon.py` | **Alto**: `start()` em challenge nunca tocado → `AttributeError` → 500 | adicionar `in_progress` ao enum (e migração) **ou** usar `ChallengeStatus.open` e só carimbar `first_interaction` |
-| 2 | Sessões de agente em memória | `app/agents/orchestrator.py` | restart perde o ciclo | tabela `agent_session` + serialização de `pending_decision`/`reports` |
-| 3 | `start`/`approve` síncronos | `app/web/agent_routes.py`, `app/api` | request longa, risco de timeout de proxy/navegador | `threading.Thread` + estado `running` + polling já existente |
-| 4 | `limits.max_attempts`/`max_minutes` ignorados | `app/agents/orchestrator.py` | sessão pode rodar indefinidamente | contar dispatches/tempo na `AgentSession` e forçar `GIVE_UP` |
-| 5 | `planner.py` não usado | `app/agents/planner.py` | priorização por pontos/dificuldade não acontece | ligar no `start()`/OP ou expor endpoint de ranking |
-| 6 | Sem inventário de ferramentas exposto | `app/tooling/doctor.py` | operador descobre ferramenta faltando no meio do evento | `GET /api/tools/inventory` + card no painel |
-| 7 | Personas de especialista ausentes | `agents/personas/` | prompt genérico, qualidade tática menor | escrever `specialist_web.md` ... `specialist_osint.md` |
-| 8 | Engine SQLite criada por request | `app/database.py::get_session` | `create_all`/`ensure_schema` a cada request (desperdício) | engine singleton em `app.state` com `yield` |
-| 9 | `reject` não valida estado | `app/agents/orchestrator.py` | "Ajustar" em sessão `solved`/`gave_up` pede decisão de novo | guardar estados permitidos e devolver 409 |
-| 10 | Rotas do painel não checam `session.challenge_id == challenge_id` | `app/web/agent_routes.py` | aprovar sessão de outro challenge via URL | comparar e 404 se divergir |
-| 11 | `Attempt.type` às vezes recebe string (`"agent"`) em vez do enum | `app/agents/recon.py`, `orchestrator.py` | funciona por coincidência do `sa.Enum`, frágil | usar `AttemptType.agent` |
-| 12 | `Attachment.type == "download"` compara enum com string | `app/agents/recon.py` | mesma fragilidade | usar `AttachmentType.download` |
-| 13 | `tracking.py` importa `datetime` duas vezes | `app/services/tracking.py` | cosmético | limpar import |
-| 14 | Fallback de modelo só cobre env var ausente | `app/agents/models.py` | 503 do NIM derruba o ciclo | retry/fallback em exceção de runtime |
-| 15 | Sem custo/tokens por ciclo | runtime | impossível medir gasto | capturar `result.usage()` do pydantic-ai e gravar em `Attempt.learning` |
+| # | Problema | Onde | Status |
+|---|---|---|---|
+| 1 | `ChallengeStatus.in_progress` inexistente no `recon.py` | `app/agents/recon.py` | ✅ corrigido (removido; adicionado `detect_file_type` + staging) |
+| 2 | Sessões de agente só em memória | `app/models.py`, `app/agents/orchestrator.py` | ✅ persistido em `AgentSessionRecord` (SQLite) |
+| 3 | `start`/`approve` apenas síncronos | `app/agents/orchestrator.py`, `app/web/agent_routes.py`, `app/agents/api.py` | ✅ suporte opcional a `background=true` (thread + polling) |
+| 4 | `limits.max_attempts`/`max_minutes` ignorados | `app/agents/planner.py`, `app/agents/orchestrator.py` | ✅ enforçados via `check_stop_criteria` |
+| 5 | `planner.py` não ligado | `app/agents/orchestrator.py`, `app/agents/api.py` | ✅ ligado no loop (`reassess_strategy`) + `GET /api/agent/events/{id}/rank` |
+| 6 | Sem inventário de ferramentas exposto | `app/agents/api.py` | ✅ exposto em `GET /api/agent/tools/inventory` |
+| 7 | Personas de especialista ausentes | `agents/personas/` | ✅ criadas `specialist_web.md` … `specialist_osint.md` |
+| 8 | Engine SQLite criada por request | `app/database.py` | ✅ cacheada por `db_path` |
+| 9 | `reject` não valida estado | `app/agents/orchestrator.py`, `app/web/agent_routes.py` | ✅ valida `awaiting_approval` e devolve 409 |
+| 10 | Rotas do painel não checam `session.challenge_id == challenge_id` | `app/web/agent_routes.py` | ✅ validado em `_session_or_404` (404 se divergir) |
+| 11–13 | Enums e import duplicado | `recon.py`, `orchestrator.py`, `tracking.py` | ✅ limpos (`AttemptType`, `AttachmentType`, `select()`) |
+| 14 | Fallback de modelo só cobre env var ausente | `app/agents/models.py`, `jury.py`, `specialists.py` | ✅ `run_with_fallback` tenta próximos candidatos em 503/429/timeout |
+| 15 | Sem custo/tokens por ciclo | `jury.py`, `specialists.py`, `orchestrator.py` | ✅ captura `result.usage` e grava no `Attempt.learning` |
 
-### Bug #1 em detalhe
-
-```python
-# app/agents/recon.py (final)
-if challenge.first_interaction is None and challenge.status.value == "open":
-    challenge.status = ChallengeStatus.in_progress   # AttributeError
-```
-
-`ChallengeStatus` = `open | solved | gave_up`. O bloco só executa no primeiro contato com o
-challenge, então o sintoma é: **primeiro `start()` de um challenge novo devolve 500**; nos
-seguintes (já com `first_interaction`) funciona. Contorno imediato: registrar uma tentativa manual
-antes de iniciar o agente.
-
----
-
-## 8. Próximos passos sugeridos (ordem)
-
-1. Corrigir o bug `in_progress` (bloqueia o fluxo em challenge novo) + teste de regressão.
-2. Persistir sessões no banco (sobreviver a restart).
-3. Enforçar `max_attempts` / `max_minutes`.
-4. Expor `Tool Doctor` (`/api/tools/inventory`) e um card de configurações.
-5. Escrever as personas de especialista.
-6. Mover execução de ciclo para thread + status `running` de verdade.
-7. Retry/fallback em 503 do provider.
+Pendências restantes:
+- Imagem/stack Docker Kali pronta para ativar `mode: docker` nas ferramentas em `config/tools.yaml`.
+- UI de configurações (aba Agents/Tools).

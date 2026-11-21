@@ -1,8 +1,6 @@
-from pathlib import Path
+from sqlmodel import Session, select
 
-from sqlmodel import Session
-
-from ..models import Attempt, AttemptType, Attachment, Challenge, Event
+from ..models import Attempt, AttemptType, Attachment, Challenge, Event, Note
 from ..services import tracking
 
 CONTEXT_BUDGETS: dict[str, int] = {
@@ -34,18 +32,31 @@ def challenge_card(session: Session, challenge: Challenge) -> str:
     return "\n".join(lines)
 
 
-def _artifact_lines(session: Session, challenge: Challenge) -> list[str]:
-    rows = session.query(Attachment).filter(Attachment.challenge_id == challenge.id).all()
-    return [f"- {a.name} ({a.type.value}, {a.size}b, path={a.path})" for a in rows]
+def _artifact_lines(session: Session, challenge: Challenge, *, in_sandbox: bool = False) -> list[str]:
+    rows = list(session.exec(select(Attachment).where(Attachment.challenge_id == challenge.id)).all())
+    lines = []
+    for a in rows:
+        t_val = a.type.value if hasattr(a.type, "value") else str(a.type)
+        hint = f", cwd_file={a.name}" if in_sandbox and t_val == "download" else ""
+        lines.append(f"- {a.name} ({t_val}, {a.size}b, path={a.path}{hint})")
+    return lines
+
+
+def _note_lines(session: Session, challenge: Challenge) -> list[str]:
+    notes = tracking.note_history(session, challenge.id)
+    return [f"- [{n.id}] {n.content}" for n in reversed(notes)]
 
 
 def _attempt_lines(session: Session, challenge: Challenge, learning_clip: int = 200) -> list[str]:
-    rows = session.query(Attempt).filter(Attempt.challenge_id == challenge.id)\
-        .order_by(Attempt.id.desc()).all()
+    rows = list(session.exec(
+        select(Attempt).where(Attempt.challenge_id == challenge.id).order_by(Attempt.id.desc())
+    ).all())
     lines = []
     for a in reversed(rows):
         learning = (a.learning or "").replace("\n", " ")[:learning_clip]
-        lines.append(f"- [{a.id}] {a.type.value}|{a.result.value}|{a.description}"
+        t_val = a.type.value if hasattr(a.type, "value") else str(a.type)
+        r_val = a.result.value if hasattr(a.result, "value") else str(a.result)
+        lines.append(f"- [{a.id}] {t_val}|{r_val}|{a.description}"
                      + (f" | {learning}" if learning else "")
                      + (f" | cmd={a.tool_command}" if a.tool_command else ""))
     return lines
@@ -55,6 +66,10 @@ def jury_context(session: Session, challenge: Challenge, budget: int | None = No
     budget = budget or CONTEXT_BUDGETS["jury"]
     parts = [challenge_card(session, challenge), "## Artifacts"]
     parts += (_artifact_lines(session, challenge) or ["(none)"])
+    notes = _note_lines(session, challenge)
+    if notes:
+        parts.append("## Operator notes")
+        parts += notes
     parts.append("## Recent attempts (newest last)")
     parts += (_attempt_lines(session, challenge) or ["(none)"])
     return _truncate("\n".join(parts), budget)
@@ -81,8 +96,8 @@ def specialist_context(session: Session, challenge: Challenge, order,
         parts.append("## Arsenal references (use these techniques)")
         for h in hits:
             parts.append(f"- {h['title']} ({h['path']}): {h['snippet']}")
-    parts.append("## Artifacts")
-    parts += (_artifact_lines(session, challenge) or ["(none)"])
+    parts.append("## Artifacts (download files are staged in sandbox cwd by filename)")
+    parts += (_artifact_lines(session, challenge, in_sandbox=True) or ["(none)"])
     return _truncate("\n".join(parts), budget)
 
 
@@ -91,8 +106,9 @@ def submission_context(session: Session, challenge: Challenge, flag_candidate: s
     budget = budget or CONTEXT_BUDGETS["submission"]
     event = session.get(Event, challenge.event_id)
     submitted = [a.tool_command for a in
-                 session.query(Attempt).filter(Attempt.challenge_id == challenge.id,
-                                               Attempt.type == AttemptType.submission).all()
+                 session.exec(select(Attempt).where(
+                     Attempt.challenge_id == challenge.id,
+                     Attempt.type == AttemptType.submission)).all()
                  if a.tool_command]
     parts = [
         challenge_card(session, challenge),

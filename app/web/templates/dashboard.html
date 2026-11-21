@@ -1,41 +1,70 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — CTF Orchestrator{% endblock %}
+{% block title %}Dashboard — KOTH{% endblock %}
 {% block content %}
 <h1>Dashboard</h1>
 
 <section class="card">
+  <h2>Novo challenge rápido</h2>
+  <p style="color: var(--muted); font-size: 0.85rem; margin-top: -0.4rem;">
+    Crie o challenge, anexe os arquivos e vá direto ao Painel do Agente em 1 passo.
+  </p>
+  <form method="post" action="/challenges/quick" enctype="multipart/form-data" style="display:grid; gap:0.6rem;">
+    <div class="form-grid">
+      <select name="event_id">
+        {% for ev in event_list %}
+          <option value="{{ ev.id }}" {% if loop.last %}selected{% endif %}>{{ ev.name }}{% if ev.flag_format %} ({{ ev.flag_format }}){% endif %}</option>
+        {% endfor %}
+        <option value="">+ criar evento automático ("CTF Local")</option>
+      </select>
+      <input name="new_event_name" placeholder="ou digite um novo nome de evento (opcional)">
+    </div>
+    {% set ch = none %}
+    {% include "_challenge_fields.html" %}
+    <div class="row-actions">
+      <button class="btn" type="submit" name="go_to" value="agent_auto">Criar e rodar Full Auto →</button>
+      <button class="btn ghost" type="submit" name="go_to" value="agent">Criar e abrir Agente</button>
+      <button class="btn ghost" type="submit" name="go_to" value="challenge">Criar e ver página</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
   <h2>Eventos</h2>
   {% for event, solved, total in events %}
-    <div>
+    <div style="margin-bottom: 0.6rem;">
       <a href="/events/{{ event.id }}">{{ event.name }}</a>
       <span class="badge">{{ event.status.value }}</span>
+      {% if event.flag_format %}<small class="mono" style="color: var(--muted);">{{ event.flag_format }}</small>{% endif %}
       <div class="meter" style="max-width: 320px;">
         <span style="width: {{ (100 * solved / total) if total else 0 }}%;"></span>
       </div>
       <small style="color: var(--muted);">{{ solved }}/{{ total }} resolvidos</small>
     </div>
   {% else %}
-    <p style="color: var(--muted);">Nenhum evento. Crie via API ou form abaixo.</p>
+    <p style="color: var(--muted);">Nenhum evento ainda.</p>
   {% endfor %}
-  <form method="post" action="/events" style="display:flex; gap:0.5rem; max-width:480px; margin-top:1rem;">
-    <input name="name" placeholder="Nome do CTF" required>
-    <button class="btn" type="submit">Criar evento</button>
+  <form method="post" action="/events" class="form-grid" style="max-width:680px; margin-top:1rem;">
+    <input name="name" placeholder="Nome do evento (ex: IDP CTF 03)" required>
+    <input name="flag_format" placeholder="Regex da flag (ex: IDP\{.*\} — padrão CTF\{.*\})">
+    <button class="btn ghost" type="submit">Criar evento</button>
   </form>
 </section>
 
 <section class="card">
   <h2>Challenges abertos</h2>
   <table class="list">
-    <tr><th>Título</th><th>Categoria</th><th>Pontos</th><th>Status</th></tr>
+    <tr><th>Título</th><th>Categoria</th><th>Pontos</th><th>Target</th><th>Status</th><th></th></tr>
     {% for c in open_challenges %}
       <tr>
         <td><a href="/challenges/{{ c.id }}">{{ c.title }}</a></td>
         <td>{{ c.category }}</td>
         <td>{{ c.points }}</td>
+        <td class="mono" style="font-size:0.85rem; color:var(--muted);">{{ c.target or "—" }}</td>
         <td><span class="badge">{{ c.status.value }}</span></td>
+        <td><a class="btn ghost" style="padding:0.2rem 0.6rem; font-size:0.8rem;" href="/challenges/{{ c.id }}/agent">Agente →</a></td>
       </tr>
     {% else %}
-      <tr><td colspan="4" style="color: var(--muted);">Nada aberto.</td></tr>
+      <tr><td colspan="6" style="color: var(--muted);">Nada aberto.</td></tr>
     {% endfor %}
   </table>
 </section>

@@ -23,7 +23,9 @@ def _sessions_of(request: Request):
         return None
 
 
-def latest_session(orch, challenge_id: int) -> AgentSession | None:
+def latest_session(orch, challenge_id: int, session: Session | None = None) -> AgentSession | None:
+    if hasattr(orch, "latest_for_challenge"):
+        return orch.latest_for_challenge(session, challenge_id)
     matches = [s for s in orch.sessions.values() if s.challenge_id == challenge_id]
     return max(matches, key=lambda s: s.created_at) if matches else None
 
@@ -35,9 +37,11 @@ def _challenge_or_404(session: Session, challenge_id: int):
     return challenge
 
 
-def _session_or_404(orch, session_id: str) -> AgentSession:
-    sess = orch.sessions.get(session_id)
-    if sess is None:
+def _session_or_404(orch, session_id: str, challenge_id: int | None = None,
+                    session: Session | None = None) -> AgentSession:
+    sess = (orch.get_session(session, session_id)
+            if hasattr(orch, "get_session") else orch.sessions.get(session_id))
+    if sess is None or (challenge_id is not None and sess.challenge_id != challenge_id):
         raise HTTPException(status_code=404, detail="unknown session")
     return sess
 
@@ -52,9 +56,12 @@ def _side(request: Request, challenge_id: int, sess: AgentSession | None):
 @router.get("/challenges/{challenge_id}/agent")
 def agent_panel(request: Request, challenge_id: int,
                 session: Session = Depends(get_session)):
+    from .routes import nav_context
+
     challenge = _challenge_or_404(session, challenge_id)
-    return templates.TemplateResponse(request, "agent_panel.html",
-                                      {"challenge": challenge})
+    ctx = nav_context(session, active_nav=f"challenge-{challenge_id}")
+    ctx["challenge"] = challenge
+    return templates.TemplateResponse(request, "agent_panel.html", ctx)
 
 
 @router.get("/challenges/{challenge_id}/agent/feed")
@@ -62,7 +69,7 @@ def agent_feed(request: Request, challenge_id: int,
                session: Session = Depends(get_session)):
     _challenge_or_404(session, challenge_id)
     orch = _sessions_of(request)
-    sess = latest_session(orch, challenge_id) if orch else None
+    sess = latest_session(orch, challenge_id, session=session) if orch else None
     return templates.TemplateResponse(request, "_agent_feed.html", {
         "challenge_id": challenge_id,
         "sess": sess.to_dict() if sess else None,
@@ -74,12 +81,14 @@ def agent_side(request: Request, challenge_id: int,
                session: Session = Depends(get_session)):
     _challenge_or_404(session, challenge_id)
     orch = _sessions_of(request)
-    sess = latest_session(orch, challenge_id) if orch else None
+    sess = latest_session(orch, challenge_id, session=session) if orch else None
     return _side(request, challenge_id, sess)
 
 
 @router.post("/challenges/{challenge_id}/agent/start")
 def agent_start(request: Request, challenge_id: int,
+                mode: str = Form("supervised"),
+                background: bool = Form(False),
                 session: Session = Depends(get_session)):
     _challenge_or_404(session, challenge_id)
     orch = _sessions_of(request)
@@ -88,11 +97,16 @@ def agent_start(request: Request, challenge_id: int,
             status_code=503,
             detail=f"agent runtime unavailable: "
                    f"{getattr(request.state, 'agent_error', 'unknown')}")
-    existing = latest_session(orch, challenge_id)
+    existing = latest_session(orch, challenge_id, session=session)
     if existing and existing.state in ("running", "awaiting_approval"):
         raise HTTPException(status_code=409, detail="session already active")
     try:
-        sess = orch.start(session, challenge_id)
+        if background and hasattr(orch, "start_background"):
+            sess = orch.start_background(session.get_bind(), session, challenge_id, mode=mode)
+        elif mode != "supervised":
+            sess = orch.start(session, challenge_id, mode=mode)
+        else:
+            sess = orch.start(session, challenge_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return _side(request, challenge_id, sess)
@@ -100,11 +114,18 @@ def agent_start(request: Request, challenge_id: int,
 
 @router.post("/challenges/{challenge_id}/agent/sessions/{session_id}/approve")
 def agent_approve(request: Request, challenge_id: int, session_id: str,
+                  mode: str | None = Form(None),
+                  background: bool = Form(False),
                   session: Session = Depends(get_session)):
     orch = get_orchestrator(request)
-    _session_or_404(orch, session_id)
+    _session_or_404(orch, session_id, challenge_id=challenge_id, session=session)
     try:
-        sess = orch.approve(session, session_id)
+        if background and hasattr(orch, "approve_background"):
+            sess = orch.approve_background(session.get_bind(), session, session_id, mode=mode)
+        elif mode is not None:
+            sess = orch.approve(session, session_id, mode=mode)
+        else:
+            sess = orch.approve(session, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return _side(request, challenge_id, sess)
@@ -114,7 +135,7 @@ def agent_approve(request: Request, challenge_id: int, session_id: str,
 def agent_terminate(request: Request, challenge_id: int, session_id: str,
                     session: Session = Depends(get_session)):
     orch = get_orchestrator(request)
-    _session_or_404(orch, session_id)
+    _session_or_404(orch, session_id, challenge_id=challenge_id, session=session)
     sess = orch.terminate(session, session_id, "rejected via panel")
     return _side(request, challenge_id, sess)
 
@@ -124,8 +145,11 @@ def agent_adjust(request: Request, challenge_id: int, session_id: str,
                  instruction: str = Form(...),
                  session: Session = Depends(get_session)):
     orch = get_orchestrator(request)
-    _session_or_404(orch, session_id)
-    sess = orch.reject(session, session_id, instruction)
+    _session_or_404(orch, session_id, challenge_id=challenge_id, session=session)
+    try:
+        sess = orch.reject(session, session_id, instruction)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return _side(request, challenge_id, sess)
 
 

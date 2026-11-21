@@ -58,3 +58,69 @@ def test_note_form_flow(client):
     assert r.status_code == 303
     notes = client.get(f"/api/challenges/{ch['id']}/notes").json()
     assert notes[0]["content"] == "my notes"
+
+
+def test_quick_challenge_flow_with_multifile_and_redirect_to_agent(client):
+    r = client.post(
+        "/challenges/quick",
+        data={
+            "event_id": "",
+            "new_event_name": "IDP CTF",
+            "title": "double_wordle",
+            "category": "crypto",
+            "points": "500",
+            "difficulty": "hard",
+            "target": "",
+            "tags": "rng",
+            "description": "crack the seed",
+            "go_to": "agent",
+        },
+        files=[
+            ("files", ("a.txt", io.BytesIO(b"part1"), "text/plain")),
+            ("files", ("b.bin", io.BytesIO(b"\x01\x02"), "application/octet-stream")),
+        ],
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].endswith("/agent")
+    ch_id = int(r.headers["location"].split("/")[2])
+
+    atts = client.get(f"/api/challenges/{ch_id}/attachments").json()
+    assert [a["name"] for a in atts] == ["a.txt", "b.bin"]
+
+    # Edit challenge from UI
+    r_edit = client.post(
+        f"/challenges/{ch_id}/edit",
+        data={
+            "title": "double_wordle_v2",
+            "category": "forensics",
+            "points": "600",
+            "difficulty": "insane",
+            "target": "10.10.10.9:1337",
+            "tags": "rng,prng",
+            "description": "updated desc",
+        },
+        follow_redirects=False,
+    )
+    assert r_edit.status_code == 303
+    page = client.get(f"/challenges/{ch_id}").text
+    assert "double_wordle_v2" in page
+    assert "10.10.10.9:1337" in page
+
+
+def test_event_create_with_flag_format_and_planner_sort(client):
+    r = client.post(
+        "/events",
+        data={"name": "IDP 03", "flag_format": r"IDP\{.*\}"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    ev_url = r.headers["location"]
+    ev_id = int(ev_url.split("/")[-1])
+
+    client.post(f"/api/events/{ev_id}/challenges", json={"title": "low", "points": 50, "difficulty": "easy"})
+    client.post(f"/api/events/{ev_id}/challenges", json={"title": "high", "points": 500, "difficulty": "hard"})
+
+    page = client.get(ev_url, params={"sort": "planner"}).text
+    assert page.index("high") < page.index("low")
+    assert r"IDP\{.*\}" in page

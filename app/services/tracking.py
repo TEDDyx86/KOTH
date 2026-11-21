@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from datetime import datetime, timezone
 
 from sqlmodel import Session, select
@@ -11,8 +9,9 @@ from ..models import (
 
 
 def create_event(session: Session, name: str, url: str | None = None,
-                 starts_at=None, ends_at=None) -> Event:
-    event = Event(name=name, url=url, starts_at=starts_at, ends_at=ends_at)
+                 starts_at=None, ends_at=None, flag_format: str | None = None) -> Event:
+    event = Event(name=name, url=url, starts_at=starts_at, ends_at=ends_at,
+                  flag_format=flag_format or None)
     session.add(event)
     session.commit()
     session.refresh(event)
@@ -95,7 +94,14 @@ def record_attempt(session: Session, challenge_id: int, type: AttemptType,
 
 def update_challenge(session: Session, challenge_id: int,
                      status: ChallengeStatus | None = None,
-                     flag: str | None = None) -> Challenge:
+                     flag: str | None = None,
+                     title: str | None = None,
+                     category: str | None = None,
+                     points: int | None = None,
+                     difficulty: Difficulty | None = None,
+                     description: str | None = None,
+                     target: str | None = None,
+                     tags: str | None = None) -> Challenge:
     challenge = session.get(Challenge, challenge_id)
     if challenge is None:
         raise LookupError(f"challenge {challenge_id} not found")
@@ -105,6 +111,20 @@ def update_challenge(session: Session, challenge_id: int,
             challenge.solved_at = datetime.now(timezone.utc)
     if flag is not None:
         challenge.flag = flag
+    if title is not None:
+        challenge.title = title
+    if category is not None:
+        challenge.category = category
+    if points is not None:
+        challenge.points = points
+    if difficulty is not None:
+        challenge.difficulty = difficulty
+    if description is not None:
+        challenge.description = description
+    if target is not None:
+        challenge.target = target or None
+    if tags is not None:
+        challenge.tags = tags
     session.add(challenge)
     session.commit()
     session.refresh(challenge)

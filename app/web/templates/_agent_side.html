@@ -2,17 +2,39 @@
 <div class="card">
   <h3>Status</h3>
   <p style="color: var(--muted);">idle — nenhuma sessão</p>
-  <form hx-post="/challenges/{{ challenge_id }}/agent/start"
-        hx-target="#agent-side" hx-swap="innerHTML">
-    <button class="btn" hx-disabled-elt="this" hx-indicator="#start-spinner">Iniciar agente</button>
+  <div style="display:grid; gap:0.5rem;">
+    <button class="btn" type="button"
+            hx-post="/challenges/{{ challenge_id }}/agent/start"
+            hx-vals='{"mode":"auto","background":"true"}'
+            hx-target="#agent-side" hx-swap="innerHTML"
+            hx-disabled-elt="this" hx-indicator="#start-spinner">
+      Iniciar Full Auto (sem aprovação)
+    </button>
+    <form hx-post="/challenges/{{ challenge_id }}/agent/start"
+          hx-target="#agent-side" hx-swap="innerHTML"
+          style="display:grid; gap:0.4rem;">
+      <input type="hidden" name="mode" value="supervised">
+      <button class="btn ghost" hx-disabled-elt="this" hx-indicator="#start-spinner">
+        Iniciar agente (supervisionado)
+      </button>
+      <label style="font-size: 0.8rem; color: var(--muted);">
+        <input type="checkbox" name="background" value="true" style="width:auto;"> Executar em background
+      </label>
+    </form>
     <span id="start-spinner" class="htmx-indicator mono" style="color: var(--warning);">
       trabalhando (recon + júri, pode levar minutos)…
     </span>
-  </form>
+  </div>
 </div>
 {% else %}
 <div class="card">
   <h3>Status <span class="badge {{ sess.state|badge_for }}">{{ sess.state }}</span></h3>
+  <p class="mono" style="color: var(--muted); font-size: 0.8rem;">
+    modo: {{ sess.mode or 'supervised' }} · dispatches: {{ sess.dispatch_count or 0 }}
+  </p>
+  {% if sess.error %}
+  <p class="mono" style="color: var(--accent);">erro: {{ sess.error }}</p>
+  {% endif %}
   {% if sess.state == "awaiting_approval" and sess.pending_decision %}
   <div class="checkpoint">
     <h4>Checkpoint — aguardando você</h4>
@@ -23,11 +45,16 @@
     {% if sess.pending_decision.flag_candidate %}
     <p class="mono">flag candidata: {{ sess.pending_decision.flag_candidate }}</p>
     {% endif %}
-    <div class="actions">
+    <div class="actions" style="flex-wrap: wrap;">
       <button class="btn" hx-disabled-elt="this"
               hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/approve"
               hx-target="#agent-side" hx-swap="innerHTML"
               hx-indicator="#cycle-spinner">Aprovar</button>
+      <button class="btn ghost" hx-disabled-elt="this"
+              hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/approve"
+              hx-vals='{"mode":"auto","background":"true"}'
+              hx-target="#agent-side" hx-swap="innerHTML"
+              hx-indicator="#cycle-spinner">Aprovar + Full Auto</button>
       <button class="btn ghost" hx-disabled-elt="this"
               hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/terminate"
               hx-target="#agent-side" hx-swap="innerHTML"
@@ -44,9 +71,18 @@
     </form>
   </div>
   {% elif sess.state == "running" %}
-  <p class="mono" style="color: var(--warning);">executando ciclo…</p>
+  <p class="mono" style="color: var(--warning);">
+    {% if sess.mode == "auto" %}executando em Full Auto…{% else %}executando ciclo…{% endif %}
+  </p>
+  <button class="btn ghost" hx-disabled-elt="this"
+          hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/terminate"
+          hx-target="#agent-side" hx-swap="innerHTML"
+          hx-confirm="Parar a execução agora?">Parar sessão</button>
   {% elif sess.state == "solved" %}
   <p class="mono" style="color: var(--flag-ok);">solved — flag validada</p>
+  {% if sess.final_report and sess.final_report.flag_candidate %}
+  <p class="mono" style="color: var(--flag-ok);">flag: {{ sess.final_report.flag_candidate }}</p>
+  {% endif %}
   {% else %}
   <p style="color: var(--muted);">sessão encerrada ({{ sess.state }})</p>
   {% endif %}

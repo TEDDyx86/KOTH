@@ -7,7 +7,7 @@ from .database import default_engine, get_session
 
 
 def create_app(engine=None, storage_dir: Path | None = None) -> FastAPI:
-    app = FastAPI(title="CTF Orchestrator")
+    app = FastAPI(title="KOTH — King Of The Hill")
 
     if engine is not None or storage_dir is not None:
         import sqlmodel
@@ -27,10 +27,12 @@ def create_app(engine=None, storage_dir: Path | None = None) -> FastAPI:
     def health():
         return {"status": "ok"}
 
+    from .agents.providers import apply_saved_keys_to_env
     from .config import settings
     from .services.storage import StorageService
 
     app.state.storage = StorageService(storage_dir or settings.storage_dir)
+    apply_saved_keys_to_env(app.state.storage.storage_dir)
 
     from .api import challenges as challenges_module
     from .api import events as events_module

@@ -9,7 +9,6 @@ providers:
     env_var: ANTHROPIC_API_KEY
   openai:
     env_var: OPENAI_API_KEY
-
 roles:
   strong:
     provider: nvidia
@@ -17,7 +16,7 @@ roles:
   fast:
     provider: nvidia
     name: nvidia/nemotron-3.5-super-vl-120b-a12b
-
 fallbacks:
   strong:
-    - {provider: nvidia, name: nvidia/nemotron-3.5-super-vl-120b-a12b}
+  - provider: nvidia
+    name: nvidia/nemotron-3.5-super-vl-120b-a12b

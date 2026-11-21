@@ -1,0 +1,42 @@
+{% if not cli_messages %}
+<div class="cli-entry op">
+  <div class="cli-entry-head">
+    <span class="cli-entry-role mono">[KOTH // OP]</span>
+    <span class="mono">BASE CAMP</span>
+  </div>
+  <pre>[KOTH // OP] Pronto para iniciar a escalada até o topo.
+Cole um desafio aqui (com target ou anexos), converse sobre estratégia ou use /solve, /rank, /status e /help.</pre>
+</div>
+{% else %}
+{% for msg in cli_messages %}
+<div class="cli-entry {{ msg.role }}">
+  <div class="cli-entry-head">
+    <span class="cli-entry-role mono">
+      {% if msg.role == 'user' %}OPERATOR{% elif msg.role == 'system' %}KOTH // SYSTEM{% else %}[KOTH // OP]{% endif %}
+    </span>
+    <span class="mono tabular">{{ msg.created_at.strftime("%H:%M:%S") }}</span>
+  </div>
+  <pre>{{ msg.content }}</pre>
+  {% if msg.challenge_id %}
+    {% set ch = cli_challenges.get(msg.challenge_id) %}
+    {% set sess = cli_sessions.get(msg.challenge_id) %}
+    <div class="cli-mission-bar" {% if sess and sess.state == 'running' %}data-running="1"{% endif %}>
+      <div class="row-actions" style="align-items:center;">
+        <span class="mono">Missão #{{ msg.challenge_id }}{% if ch %}: {{ ch.title }}{% endif %}</span>
+        {% if sess %}
+          <span class="badge {{ sess.state|badge_for }}">{{ sess.state }}</span>
+          <span class="mono" style="color:var(--muted);">dispatches: {{ sess.dispatch_count or 0 }}</span>
+          {% if sess.final_report and sess.final_report.flag_candidate %}
+            <span class="badge flag-ok mono">{{ sess.final_report.flag_candidate }}</span>
+          {% endif %}
+        {% endif %}
+      </div>
+      <div class="row-actions">
+        <a class="btn ghost" style="padding:0.25rem 0.65rem; font-size:0.78rem;" href="/challenges/{{ msg.challenge_id }}/agent">Painel do Agente →</a>
+        <a class="btn ghost" style="padding:0.25rem 0.65rem; font-size:0.78rem;" href="/challenges/{{ msg.challenge_id }}">Detalhes</a>
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}

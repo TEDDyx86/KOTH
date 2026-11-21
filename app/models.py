@@ -103,3 +103,27 @@ class Attachment(SQLModel, table=True):
     size: int = 0
     type: AttachmentType
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class AgentSessionRecord(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    challenge_id: int = Field(foreign_key="challenge.id", index=True)
+    state: str = "running"
+    mode: str = "supervised"
+    dispatch_count: int = 0
+    pending_decision_json: str | None = None
+    findings_json: str = "[]"
+    reports_json: str = "[]"
+    final_report_json: str | None = None
+    error: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class CliMessageRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    role: str  # user | op | system
+    content: str
+    challenge_id: int | None = Field(default=None, foreign_key="challenge.id", index=True)
+    session_id: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
