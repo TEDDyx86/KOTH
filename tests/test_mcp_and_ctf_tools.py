@@ -164,6 +164,41 @@ def test_mcp_servers_crud_and_toolsets(tmp_path, monkeypatch):
     assert "koth-ctf" in koth_mcp_client_snippet(tmp_path)
 
 
+def test_probe_mcp_server_unwraps_prefixed_toolset(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from app.tooling.mcp_servers import probe_mcp_server
+
+    mcp_file = tmp_path / "mcp.yaml"
+    add_mcp_server(
+        "ghidra",
+        label="PyGhidra",
+        category="reversing",
+        transport="http",
+        url="http://127.0.0.1:8080/mcp",
+        enabled=True,
+        path=mcp_file,
+    )
+
+    class FakeInner:
+        async def list_tools(self):
+            return [SimpleNamespace(name="decompile_function"), SimpleNamespace(name="import_binary")]
+
+    class FakePrefixed:
+        def __init__(self):
+            self.wrapped = FakeInner()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr("app.tooling.mcp_servers._make_toolset", lambda spec: FakePrefixed())
+    ok, msg = probe_mcp_server("ghidra", path=mcp_file)
+    assert ok is True
+    assert "decompile_function" in msg
+
+
 def test_specialist_ai_helper_tools_and_koth_mcp(tmp_path):
     engine, session, _ev, ch = _make_env(tmp_path)
     storage = StorageService(tmp_path / "storage")

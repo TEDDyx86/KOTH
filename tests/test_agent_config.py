@@ -10,6 +10,7 @@ def test_load_seed_models():
     assert cfg.roles["strong"].name == "nvidia/nemotron-3-ultra-550b-a55b"
     assert cfg.roles["fast"].name == "nvidia/nemotron-3.5-super-vl-120b-a12b"
     assert cfg.fallbacks["strong"] == [cfg.roles["fast"]]
+    assert cfg.fallbacks["fast"] == [cfg.roles["strong"]]
 
 
 def test_load_custom_models_path(tmp_path):
@@ -38,6 +39,8 @@ def test_load_seed_agents():
     assert cfg.roles["jury"].model == "strong"
     assert cfg.roles["specialist_web"].model == "fast"
     assert cfg.roles["op"].persona.endswith("op.md")
+    assert cfg.limits["max_attempts"] >= 20
+    assert cfg.limits["max_minutes"] >= 90
 
 
 def test_load_custom_agents_path(tmp_path):

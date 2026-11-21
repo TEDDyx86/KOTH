@@ -20,3 +20,6 @@ fallbacks:
   strong:
   - provider: nvidia
     name: nvidia/nemotron-3.5-super-vl-120b-a12b
+  fast:
+  - provider: nvidia
+    name: nvidia/nemotron-3-ultra-550b-a55b

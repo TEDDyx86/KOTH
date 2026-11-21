@@ -10,13 +10,13 @@ servers:
     description: "Desmontagem, xrefs, funções e decompilação via radare2 para Reverse e Pwn."
 
   ghidra:
-    label: "GhidraMCP (Decompiler / Reversing)"
+    label: "GhidraMCP / PyGhidra (Decompiler / Reversing)"
     category: reversing
-    transport: sse
-    url: "http://127.0.0.1:8080/sse"
+    transport: http
+    url: "http://127.0.0.1:8080/mcp"
     headers: {}
-    enabled: false
-    description: "Ponte MCP para o Ghidra ativo (funções, pseudo-C, símbolos e strings)."
+    enabled: true
+    description: "Ponte MCP HTTP para o PyGhidra/Ghidra 12 (import_binary, decompile_function, xrefs, strings)."
 
   gdb:
     label: "GDB / Pwndbg MCP (Pwn / Debug)"
@@ -35,7 +35,7 @@ servers:
     command: npx
     args: ["-y", "@playwright/mcp@latest", "--headless"]
     env: {}
-    enabled: false
+    enabled: true
     description: "Navegador headless para XSS, CSRF, DOM/localStorage e SPAs JavaScript."
 
   fetch:
@@ -45,7 +45,7 @@ servers:
     command: uvx
     args: ["mcp-server-fetch"]
     env: {}
-    enabled: false
+    enabled: true
     description: "Download limpo de páginas web e conversão para Markdown para Web e OSINT."
 
   hexstrike:

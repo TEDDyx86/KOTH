@@ -432,3 +432,25 @@ def test_terminate_stops_running_full_auto_loop(env):
     sess = orch.start(session, ch.id, mode="auto")
     assert sess.state == "rejected"
     assert sess.pending_decision is None
+
+
+def test_dispatch_raises_tool_budget_floor_for_heavy_categories(env):
+    _, session, _, ch, storage = env
+    runner = ToolRunner(load_tools_config(), storage)
+    seen_orders = []
+
+    class CaptureSpec:
+        def run(self, session, challenge, order, runner=None):
+            seen_orders.append(order)
+            from app.agents.payloads import SpecialistReport
+            return SpecialistReport(status="NEED_HINT", findings=["ok"])
+
+    jury = JuryAgent(_scripted([
+        {"action": "DISPATCH", "reason": "rev",
+         "order": {"category": "rev", "task": "analyze binary", "max_tool_runs": 5}, "findings": []},
+    ]), persona_text="jury")
+    orch = Orchestrator(runner=runner, jury=jury, specialists={"reversing": CaptureSpec()})
+    s0 = orch.start(session, ch.id, mode="supervised")
+    orch.approve(session, s0.id, mode="supervised")
+    assert len(seen_orders) == 1
+    assert seen_orders[0].max_tool_runs == 8

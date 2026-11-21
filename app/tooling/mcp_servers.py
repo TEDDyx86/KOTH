@@ -214,15 +214,16 @@ def build_pydantic_toolsets(category: str | None = None, path: Path | None = Non
     return toolsets
 
 
-async def _probe_async(spec: McpServerSpec, timeout_s: float = 8.0) -> tuple[bool, str]:
+async def _probe_async(spec: McpServerSpec, timeout_s: float = 20.0) -> tuple[bool, str]:
     ts = _make_toolset(spec)
     if ts is None:
         hint = f"comando '{spec.command}' não encontrado no PATH" if spec.transport == "stdio" else "URL inválida"
         return False, hint
+    inner = getattr(ts, "wrapped", ts)
     try:
         async def _check():
             async with ts:
-                tools = await ts.list_tools()
+                tools = await inner.list_tools()
                 names = [getattr(t, "name", str(t)) for t in (tools or [])]
                 return names
 
@@ -233,7 +234,7 @@ async def _probe_async(spec: McpServerSpec, timeout_s: float = 8.0) -> tuple[boo
         return False, f"falha ao conectar MCP '{spec.name}': {type(exc).__name__}: {str(exc)[:140]}"
 
 
-def probe_mcp_server(name: str, path: Path | None = None, timeout_s: float = 8.0) -> tuple[bool, str]:
+def probe_mcp_server(name: str, path: Path | None = None, timeout_s: float = 20.0) -> tuple[bool, str]:
     specs = load_mcp_config(path)
     if name not in specs:
         return False, f"Servidor MCP '{name}' não encontrado"

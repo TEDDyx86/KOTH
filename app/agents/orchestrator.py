@@ -562,6 +562,8 @@ class Orchestrator:
                   agent_session: AgentSession, decision: JuryDecision) -> SpecialistReport:
         order = decision.order
         resolved_cat, specialist, route_note = self._resolve_specialist(order.category)
+        if resolved_cat in ("reversing", "pwn", "forensics", "crypto") and (order.max_tool_runs or 0) < 8:
+            order = order.model_copy(update={"max_tool_runs": 8})
         if route_note:
             self._accumulate(agent_session, [route_note])
         usage_suffix = ""
