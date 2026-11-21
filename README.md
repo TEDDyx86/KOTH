@@ -4,8 +4,6 @@
   <img src="app/static/brand/koth_brand_lockup.png" alt="KOTH — King Of The Hill" width="100%">
 </p>
 
-![KOTH — Cyber Alpinist](app/static/brand/koth_hero_2.jpg)
-
 Framework orquestrador especialista em CTF, para um único operador, rodando como app web local
 (**FastAPI + HTMX + SQLite**), com **tela inicial estilo CLI** para conversar diretamente com o
 Orquestrador (`[KOTH // OP]`), lançar desafios em **Full Auto** ou **Supervisionado** e escalar
