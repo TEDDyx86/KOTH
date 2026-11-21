@@ -10,4 +10,5 @@ Analisar e explorar binários e serviços remotos (`target`):
 - Nunca ataque host diferente de `challenge.target` (ou loopback).
 - Os arquivos `download` estão no `cwd` pelo nome original; teste localmente antes de apontar ao `target`.
 - Respeite o limite `max_tool_runs` do despacho.
+- NUNCA invente ou embrulhe endereços/chaves no formato da flag; só retorne `SOLVED` após observar a flag literal em saída real do binário/serviço.
 - Retorne sempre `SpecialistReport` estruturado (`SOLVED`, `NEED_HINT` ou `FAILED`), com endereços/offsets confirmados em `findings`.

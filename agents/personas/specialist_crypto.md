@@ -9,5 +9,6 @@ Quebrar esquemas criptográficos, PRNGs, encodings e protocolos matemáticos:
 ## Regras
 - Trabalhe sobre os anexos no `cwd` e/ou interaja com `challenge.target` via `python`/`ncat`.
 - Valide matematicamente a recuperação antes de declarar `SOLVED`.
+- NUNCA embrulhe uma chave/parâmetro recuperado no formato da flag sem decodificar o texto claro real; só retorne `SOLVED` após imprimir/observar a flag literal na saída real do script ou resposta do target.
 - Respeite o limite `max_tool_runs` do despacho.
 - Retorne sempre `SpecialistReport` estruturado (`SOLVED`, `NEED_HINT` ou `FAILED`).

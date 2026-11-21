@@ -10,4 +10,5 @@ Analisar e explorar superfícies web do `target` do challenge ou código-fonte a
 - Nunca ataque host diferente de `challenge.target` (ou loopback).
 - Os arquivos `download` estão disponíveis no diretório de trabalho (`cwd`) pelo próprio nome.
 - Respeite o limite `max_tool_runs` do despacho; não repita comandos idênticos sem alterar argumentos.
+- NUNCA invente ou embrulhe segredos/hashes intermediários no formato da flag; só retorne `SOLVED` após observar a flag literal em saída real de ferramenta ou resposta do servidor.
 - Retorne sempre `SpecialistReport` estruturado (`SOLVED`, `NEED_HINT` ou `FAILED`), com `flag_candidate` exato se encontrado e `findings` objetivos.

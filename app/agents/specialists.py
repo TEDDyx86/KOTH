@@ -3,6 +3,7 @@ from pathlib import Path
 import threading
 
 from pydantic_ai import Agent, BinaryContent, ModelRetry, RunContext
+from pydantic_ai.messages import ToolReturnPart
 from sqlmodel import select
 
 from ..knowledge.index import DEFAULT_KNOWLEDGE_ROOT, KnowledgeIndex
@@ -46,6 +47,29 @@ def _extract_usage(result) -> dict | None:
         "output_tokens": getattr(u, "output_tokens", None) or getattr(u, "response_tokens", 0) or 0,
         "total_tokens": getattr(u, "total_tokens", 0) or 0,
     }
+
+
+def _extract_tool_outputs(result) -> list[str]:
+    """Collect serialized ToolReturnPart payloads produced during an agent run."""
+    outputs: list[str] = []
+    all_msgs = getattr(result, "all_messages", None)
+    if not callable(all_msgs):
+        return outputs
+    try:
+        messages = all_msgs()
+    except Exception:
+        return outputs
+    for msg in messages or []:
+        for part in getattr(msg, "parts", None) or []:
+            if isinstance(part, ToolReturnPart) or getattr(part, "part_kind", None) == "tool-return":
+                tname = getattr(part, "tool_name", "") or ""
+                if tname == "final_result" or tname.startswith("final_result_"):
+                    continue
+                try:
+                    outputs.append(part.model_response_str())
+                except Exception:
+                    outputs.append(str(getattr(part, "content", "")))
+    return outputs
 
 
 def _forensics_images(session, challenge, runner: ToolRunner | None) -> list[BinaryContent]:
@@ -221,8 +245,10 @@ class SpecialistRunner:
         self.models = [model, *(fallback_models or [])]
         self.agent = _build_specialist_agent(model, persona_text, max_tool_retries)
         self.last_usage: dict | None = None
+        self.last_tool_outputs: list[str] = []
 
     def run(self, session, challenge, order: TaskOrder, runner: ToolRunner) -> SpecialistReport:
+        self.last_tool_outputs = []
         deps = RunDeps(runner=runner, session=session, challenge=challenge, order=order)
         text_prompt = specialist_context(session, challenge, order)
         allowed_tools = ", ".join(sorted(runner.settings.tools))
@@ -254,4 +280,5 @@ class SpecialistRunner:
 
         result = run_with_fallback(self.models, _call)
         self.last_usage = _extract_usage(result)
+        self.last_tool_outputs = _extract_tool_outputs(result)
         return result.output

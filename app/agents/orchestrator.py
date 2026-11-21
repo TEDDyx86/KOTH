@@ -91,6 +91,52 @@ def _record_to_session(rec: AgentSessionRecord) -> AgentSession:
     )
 
 
+_UNRESOLVED_NEXT_HINTS = (
+    "to obtain",
+    "to confirm",
+    "obtain/confirm",
+    "confirm the flag",
+    "retrieve the flag",
+    "get the flag",
+    "submit derived",
+    "para obter",
+    "confirmar a flag",
+    "ainda falta",
+)
+
+
+def _has_verified_flag_evidence(
+    session: Session | None,
+    challenge: Challenge,
+    report: SpecialistReport,
+    candidate: str,
+    tool_outputs: list[str],
+) -> tuple[bool, str | None]:
+    """Guard fast-path SOLVED against fabricated flags wrapped around keys/hashes."""
+    next_low = (report.next_step or "").strip().lower()
+    if next_low and any(hint in next_low for hint in _UNRESOLVED_NEXT_HINTS):
+        return (
+            False,
+            f"fast-path blocked for {candidate!r}: report.next_step still indicates obtaining/confirming the flag",
+        )
+    if tool_outputs:
+        haystack_parts = list(tool_outputs)
+        if session is not None:
+            try:
+                for att in tracking.list_attempts(session, challenge.id):
+                    if att.learning:
+                        haystack_parts.append(att.learning)
+            except Exception:
+                pass
+        if candidate not in "\n".join(haystack_parts):
+            return (
+                False,
+                f"fast-path blocked for {candidate!r}: flag literal was not observed in any tool/API output "
+                "(do not wrap derived keys or hashes in flag format; execute/verify until the server or tool prints the literal flag)",
+            )
+    return True, None
+
+
 class Orchestrator:
     """OP + PL + RC + JU + S1-S6 + SU loop.
     In 'supervised' mode (default), stops at awaiting_approval after each decision.
@@ -106,6 +152,7 @@ class Orchestrator:
         self.sessions: dict[str, AgentSession] = {}
         self._lock = threading.RLock()
         self._active_workers: dict[str, int] = {}  # session_id -> challenge_id
+        self._last_dispatch_outputs: list[str] = []
 
     # -- persistence & helpers ---------------------------------------------
     def _save(self, session: Session | None, sess: AgentSession) -> None:
@@ -327,21 +374,29 @@ class Orchestrator:
             agent_session.dispatch_count += 1
             last_report = self._dispatch(session, challenge, agent_session, decision)
 
-            # Fast-path in auto mode when specialist already produced a valid flag
+            # Fast-path in auto mode when specialist already produced a valid, evidenced flag
             cand = (last_report.flag_candidate or "").strip()
             if agent_session.mode == "auto" and last_report.status == "SOLVED" and cand:
-                res = validate_flag(session, challenge, cand)
-                if res.accepted:
-                    agent_session.state = "solved"
-                    agent_session.pending_decision = None
-                    self._build_final_report(challenge.id, agent_session, "solved",
-                                             flag_candidate=cand,
-                                             session=session, challenge=challenge)
-                    self._save(session, agent_session)
-                    return True
-                msg = f"specialist candidate {cand!r} rejected: {res.reason}"
-                self._accumulate(agent_session, [msg])
-                extra_feedback = msg
+                evidenced, reject_reason = _has_verified_flag_evidence(
+                    session, challenge, last_report, cand, self._last_dispatch_outputs
+                )
+                if not evidenced:
+                    msg = reject_reason or f"fast-path blocked for {cand!r}"
+                    self._accumulate(agent_session, [msg])
+                    extra_feedback = msg
+                else:
+                    res = validate_flag(session, challenge, cand)
+                    if res.accepted:
+                        agent_session.state = "solved"
+                        agent_session.pending_decision = None
+                        self._build_final_report(challenge.id, agent_session, "solved",
+                                                 flag_candidate=cand,
+                                                 session=session, challenge=challenge)
+                        self._save(session, agent_session)
+                        return True
+                    msg = f"specialist candidate {cand!r} rejected: {res.reason}"
+                    self._accumulate(agent_session, [msg])
+                    extra_feedback = msg
 
             action, reason = reassess_strategy(
                 agent_session.created_at,
@@ -567,6 +622,7 @@ class Orchestrator:
         if route_note:
             self._accumulate(agent_session, [route_note])
         usage_suffix = ""
+        self._last_dispatch_outputs = []
         if specialist is None:
             self._accumulate(agent_session,
                              [f"no specialist for category '{order.category}'"])
@@ -576,6 +632,7 @@ class Orchestrator:
             try:
                 report = specialist.run(session, challenge, order, runner=self.runner)
                 usage_suffix = self._accumulate_usage(agent_session, specialist)
+                self._last_dispatch_outputs = list(getattr(specialist, "last_tool_outputs", None) or [])
             except Exception as exc:  # model/tool failure must not kill the loop
                 try:
                     session.rollback()

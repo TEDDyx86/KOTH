@@ -454,3 +454,34 @@ def test_dispatch_raises_tool_budget_floor_for_heavy_categories(env):
     orch.approve(session, s0.id, mode="supervised")
     assert len(seen_orders) == 1
     assert seen_orders[0].max_tool_runs == 8
+
+
+def test_fast_path_blocks_fabricated_flag_when_tools_ran_without_literal(env):
+    _, session, _, ch, storage = env
+    runner = ToolRunner(load_tools_config(), storage)
+    jury = JuryAgent(_scripted([
+        {"action": "DISPATCH", "reason": "r1",
+         "order": {"category": "reversing", "task": "derive key"}, "findings": []},
+        {"action": "DISPATCH", "reason": "query api with key",
+         "order": {"category": "reversing", "task": "post /api/step"}, "findings": []},
+        {"action": "SUBMIT", "reason": "server returned flag",
+         "flag_candidate": "CTF{real_server_flag}", "findings": ["api returned literal"]},
+    ]), persona_text="jury")
+    spec = SpecialistRunner(_scripted([
+        # Dispatch 1: tool outputs bare hex, specialist wraps it as CTF{...} and says next_step="to confirm the flag"
+        {"tool": "python", "args": ["-c", "print('DERIVED KEY: deadbeef')"]},
+        {"status": "SOLVED", "flag_candidate": "CTF{deadbeef}",
+         "findings": ["derived key deadbeef"],
+         "next_step": "Submit derived key to obtain/confirm the flag."},
+        # Dispatch 2: tool actually prints the real literal flag
+        {"tool": "python", "args": ["-c", "print('CTF{real_server_flag}')"]},
+        {"status": "SOLVED", "flag_candidate": "CTF{real_server_flag}",
+         "findings": ["api returned CTF{real_server_flag}"]},
+    ]), persona_text="spec")
+
+    orch = Orchestrator(runner=runner, jury=jury, specialists={"reversing": spec})
+    s = orch.start(session, ch.id, mode="auto")
+    assert s.state == "solved"
+    assert s.dispatch_count == 2
+    assert s.final_report.flag_candidate == "CTF{real_server_flag}"
+    assert any("fast-path blocked" in f for f in s.findings)
