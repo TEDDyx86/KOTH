@@ -45,10 +45,12 @@ def test_no_target_args_without_hosts_pass(tmp_path):
 
 def test_local_filenames_allowed_while_urls_checked(tmp_path):
     f = ToolRunnerFixture(tmp_path)
-    assert f.validate(None, ["challenge.bin", "photo.jpg", "capture.pcap"]) == [
+    assert f.validate(None, ["challenge.bin", "photo.jpg", "capture.pcap", "Cofre-unsigned.ipa", "Info.plist"]) == [
         "challenge.bin",
         "photo.jpg",
         "capture.pcap",
+        "Cofre-unsigned.ipa",
+        "Info.plist",
     ]
     with pytest.raises(TargetNotAllowed):
         f.validate("chal.local:1337", ["https://evil.py/payload"])

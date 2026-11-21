@@ -31,8 +31,10 @@ _ALWAYS_OK = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal"
 _URL_SCHEME = re.compile(r"^[a-z][a-z0-9+\-.]*://", re.IGNORECASE)
 _FILE_SUFFIXES = {
     ".txt", ".bin", ".elf", ".exe", ".dll", ".so", ".o", ".a", ".out", ".raw",
+    ".dylib", ".macho", ".ipa", ".plist", ".dex", ".deb", ".rpm", ".dmg", ".pkg",
     ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico",
     ".pdf", ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar",
+    ".docx", ".xlsx", ".pptx", ".ttf", ".otf", ".ovpn",
     ".pcap", ".pcapng", ".cap", ".sql", ".sqlite", ".db", ".csv", ".log",
     ".py", ".c", ".cpp", ".h", ".js", ".ts", ".json", ".yaml", ".yml", ".xml",
     ".key", ".pem", ".pub", ".crt", ".csr", ".der", ".enc", ".img", ".iso",

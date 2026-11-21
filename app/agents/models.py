@@ -1,5 +1,6 @@
 import os
 
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -91,8 +92,17 @@ def is_transient_provider_error(exc: Exception) -> bool:
     return any(hint in msg for hint in _TRANSIENT_HINTS)
 
 
+def _is_model_output_error(exc: Exception) -> bool:
+    """Return True when a model exhausts structured-output / tool validation retries."""
+    if isinstance(exc, UnexpectedModelBehavior):
+        return True
+    name = type(exc).__name__.lower()
+    msg = str(exc).lower()
+    return "unexpectedmodelbehavior" in name or "exceeded maximum output retries" in msg
+
+
 def run_with_fallback(models: list[Model], fn):
-    """Execute `fn(model)` trying fallback models when a transient provider error occurs."""
+    """Execute `fn(model)` trying fallback models on transient or output-retry errors."""
     last_exc: Exception | None = None
     for idx, model in enumerate(models):
         try:
@@ -100,7 +110,7 @@ def run_with_fallback(models: list[Model], fn):
         except Exception as exc:
             last_exc = exc
             has_next = idx + 1 < len(models)
-            if not has_next or not is_transient_provider_error(exc):
+            if not has_next or not (is_transient_provider_error(exc) or _is_model_output_error(exc)):
                 raise
     assert last_exc is not None
     raise last_exc

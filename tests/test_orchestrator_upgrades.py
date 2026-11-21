@@ -281,6 +281,21 @@ def test_run_with_fallback_on_503():
     assert calls == ["primary", "backup"]
 
 
+def test_run_with_fallback_on_unexpected_model_behavior():
+    from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+    calls = []
+
+    def fn(model):
+        calls.append(model)
+        if model == "primary":
+            raise UnexpectedModelBehavior("Exceeded maximum output retries (4)")
+        return "ok-recovered"
+
+    assert run_with_fallback(["primary", "backup"], fn) == "ok-recovered"
+    assert calls == ["primary", "backup"]
+
+
 def test_background_start_and_new_endpoints(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'bg.db'}", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
