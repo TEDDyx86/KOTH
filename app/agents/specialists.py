@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+import threading
 
 from pydantic_ai import Agent, BinaryContent, ModelRetry, RunContext
 from sqlmodel import select
@@ -30,6 +31,7 @@ class RunDeps:
     challenge: object
     order: TaskOrder
     tool_calls: int = 0
+    lock: threading.RLock = field(default_factory=threading.RLock)
 
 
 def _extract_usage(result) -> dict | None:
@@ -83,6 +85,8 @@ def _build_specialist_agent(
         "deps_type": RunDeps,
         "output_type": SpecialistReport,
         "system_prompt": persona_text,
+        "retries": max(max_tool_retries, 4),
+        "max_concurrency": 1,
     }
     if toolsets:
         kwargs["toolsets"] = toolsets
@@ -92,21 +96,27 @@ def _build_specialist_agent(
     def run_tool(ctx: RunContext[RunDeps], tool: str, args: list[str]) -> str:
         """Execute an allowlisted tool against the challenge via the sandbox.
         Returns captured stdout/stderr (truncated)."""
-        limit = max(int(ctx.deps.order.max_tool_runs or 1), 1)
-        if ctx.deps.tool_calls >= limit:
-            raise ModelRetry(
-                f"tool call budget ({limit}) reached — do not call more tools, "
-                "return your SpecialistReport now."
-            )
-        ctx.deps.tool_calls += 1
-        allowed_list = ", ".join(sorted(ctx.deps.runner.settings.tools))
-        try:
-            res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge, tool, args)
-        except Exception as exc:  # allowlist/guard/target violations
-            raise ModelRetry(
-                f"tool run rejected: {type(exc).__name__}: {exc}. "
-                f"Allowed tools: {allowed_list}. Retry with a fixed call."
-            )
+        with ctx.deps.lock:
+            limit = max(int(ctx.deps.order.max_tool_runs or 1), 1)
+            if ctx.deps.tool_calls >= limit:
+                raise ModelRetry(
+                    f"tool call budget ({limit}) reached — do not call more tools, "
+                    "return your SpecialistReport now."
+                )
+            ctx.deps.tool_calls += 1
+            allowed_list = ", ".join(sorted(ctx.deps.runner.settings.tools))
+            try:
+                res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge, tool, args)
+            except Exception as exc:  # allowlist/guard/target violations
+                if ctx.deps.session is not None and hasattr(ctx.deps.session, "rollback"):
+                    try:
+                        ctx.deps.session.rollback()
+                    except Exception:
+                        pass
+                raise ModelRetry(
+                    f"tool run rejected: {type(exc).__name__}: {exc}. "
+                    f"Allowed tools: {allowed_list}. Retry with a fixed call."
+                )
         return (
             f"rc={res.returncode} truncated={res.truncated}\n"
             f"--- stdout ---\n{res.stdout[:4000]}\n"
@@ -117,33 +127,40 @@ def _build_specialist_agent(
     def run_python_script(ctx: RunContext[RunDeps], filename: str, code: str) -> str:
         """Write a Python script inside the challenge sandbox workdir (/work) and execute it.
         Ideal for pwntools exploits, Z3/SymPy crypto solvers, Scapy PCAP parsing, and HTTP scripts."""
-        limit = max(int(ctx.deps.order.max_tool_runs or 1), 1)
-        if ctx.deps.tool_calls >= limit:
-            raise ModelRetry(
-                f"tool call budget ({limit}) reached — do not call more tools, "
-                "return your SpecialistReport now."
-            )
-        ctx.deps.tool_calls += 1
-        try:
-            workdir = ctx.deps.runner.sandbox_workdir(ctx.deps.challenge)
-            target = safe_sandbox_file(workdir, filename or "solve.py")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(code, encoding="utf-8")
-            rel = str(target.relative_to(workdir)).replace("\\", "/")
-            res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge, "python", [rel])
-        except Exception as exc:
-            raise ModelRetry(f"run_python_script failed: {type(exc).__name__}: {exc}")
+        with ctx.deps.lock:
+            limit = max(int(ctx.deps.order.max_tool_runs or 1), 1)
+            if ctx.deps.tool_calls >= limit:
+                raise ModelRetry(
+                    f"tool call budget ({limit}) reached — do not call more tools, "
+                    "return your SpecialistReport now."
+                )
+            ctx.deps.tool_calls += 1
+            try:
+                workdir = ctx.deps.runner.sandbox_workdir(ctx.deps.challenge)
+                target = safe_sandbox_file(workdir, filename or "solve.py")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(code, encoding="utf-8")
+                rel = str(target.relative_to(workdir)).replace("\\", "/")
+                res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge, "python", [rel])
+            except Exception as exc:
+                if ctx.deps.session is not None and hasattr(ctx.deps.session, "rollback"):
+                    try:
+                        ctx.deps.session.rollback()
+                    except Exception:
+                        pass
+                raise ModelRetry(f"run_python_script failed: {type(exc).__name__}: {exc}")
         return (
             f"script={rel} rc={res.returncode} truncated={res.truncated}\n"
             f"--- stdout ---\n{res.stdout[:4000]}\n"
             f"--- stderr ---\n{res.stderr[:1000]}"
         )
 
-    @agent.tool
+    @agent.tool(retries=max_tool_retries)
     def list_sandbox_files(ctx: RunContext[RunDeps]) -> str:
         """List files currently in the challenge sandbox workdir (/work)."""
-        ctx.deps.runner.stage_downloads(ctx.deps.session, ctx.deps.challenge)
-        workdir = ctx.deps.runner.sandbox_workdir(ctx.deps.challenge)
+        with ctx.deps.lock:
+            ctx.deps.runner.stage_downloads(ctx.deps.session, ctx.deps.challenge)
+            workdir = ctx.deps.runner.sandbox_workdir(ctx.deps.challenge)
         items: list[str] = []
         for p in sorted(workdir.rglob("*")):
             if p.is_file():
@@ -151,13 +168,14 @@ def _build_specialist_agent(
                 items.append(f"{rel} ({p.stat().st_size} bytes)")
         return "\n".join(items[:80]) if items else "(empty workdir)"
 
-    @agent.tool
+    @agent.tool(retries=max_tool_retries)
     def read_sandbox_file(
         ctx: RunContext[RunDeps], filename: str, offset: int = 0, max_bytes: int = 4000
     ) -> str:
         """Read a slice of text (or hex summary for binary) from a file inside the sandbox workdir."""
-        ctx.deps.runner.stage_downloads(ctx.deps.session, ctx.deps.challenge)
-        workdir = ctx.deps.runner.sandbox_workdir(ctx.deps.challenge)
+        with ctx.deps.lock:
+            ctx.deps.runner.stage_downloads(ctx.deps.session, ctx.deps.challenge)
+            workdir = ctx.deps.runner.sandbox_workdir(ctx.deps.challenge)
         target = safe_sandbox_file(workdir, filename)
         if not target.exists():
             return f"file not found: {filename}"
@@ -172,14 +190,15 @@ def _build_specialist_agent(
             hex_preview = chunk[:512].hex(" ")
             return f"[binary {start}..{start + len(chunk)} / {len(raw)}b hex]\n{hex_preview}"
 
-    @agent.tool
+    @agent.tool(retries=max_tool_retries)
     def search_arsenal(ctx: RunContext[RunDeps], query: str, category: str = "") -> str:
         """Search the local FTS5 CTF knowledge base (ctf-skills + dispatch) for exploit techniques."""
         if ctx.deps.session is None:
             return "(knowledge unavailable without DB session)"
-        idx = KnowledgeIndex(ctx.deps.session, knowledge_root=DEFAULT_KNOWLEDGE_ROOT)
-        cat = (category or ctx.deps.order.category or "").strip().lower() or None
-        hits = idx.search(query.strip(), limit=4, category=cat) or idx.search(query.strip(), limit=4)
+        with ctx.deps.lock:
+            idx = KnowledgeIndex(ctx.deps.session, knowledge_root=DEFAULT_KNOWLEDGE_ROOT)
+            cat = (category or ctx.deps.order.category or "").strip().lower() or None
+            hits = idx.search(query.strip(), limit=4, category=cat) or idx.search(query.strip(), limit=4)
         if not hits:
             return f"no arsenal hits for {query!r}"
         return "\n".join(f"- {h['title']} ({h['path']}): {h['snippet']}" for h in hits)

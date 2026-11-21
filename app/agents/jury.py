@@ -32,10 +32,14 @@ def _extract_usage(result) -> dict | None:
 
 class JuryAgent:
     def __init__(self, model, persona_text: str,
-                 fallback_models: list | None = None) -> None:
+                 fallback_models: list | None = None,
+                 output_retries: int = 4) -> None:
         self.persona_text = persona_text
+        self.output_retries = output_retries
         self.models = [model, *(fallback_models or [])]
-        self.agent = Agent(model, output_type=JuryDecision, system_prompt=persona_text)
+        self.agent = Agent(model, output_type=JuryDecision,
+                           system_prompt=persona_text,
+                           retries=output_retries)
         self.last_usage: dict | None = None
 
     def decide(self, session, challenge: Challenge,
@@ -50,7 +54,8 @@ class JuryAgent:
 
         def _call(m):
             ag = self.agent if m is self.models[0] else Agent(
-                m, output_type=JuryDecision, system_prompt=self.persona_text)
+                m, output_type=JuryDecision, system_prompt=self.persona_text,
+                retries=self.output_retries)
             return ag.run_sync(prompt)
 
         result = run_with_fallback(self.models, _call)

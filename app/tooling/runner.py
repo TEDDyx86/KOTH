@@ -205,11 +205,15 @@ class ToolRunner:
         session.add(attachment)
         session.commit()
         session.refresh(attachment)
+        combined_out = res.stdout.strip()
+        if res.stderr.strip():
+            err_block = f"[stderr] {res.stderr.strip()}"
+            combined_out = f"{combined_out}\n{err_block}".strip() if combined_out else err_block
         attempt = tracking.record_attempt(
             session, challenge.id, AttemptType.tool,
             f"{tool} run (rc={res.returncode})", attempt_result,
             tool_command=" ".join(res.argv),
-            learning=res.stdout[:2000])
+            learning=combined_out[:2000])
         res.attachment_id = attachment.id
         res.attempt_id = attempt.id
         return res

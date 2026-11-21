@@ -227,3 +227,31 @@ def test_orphaned_running_session_recovered_on_restart(env):
     assert recovered.state == "rejected"
     assert "reinício" in (recovered.error or "")
     assert recovered.total_tokens == 420
+
+
+def test_parallel_tool_calls_are_thread_safe_on_same_session(env):
+    _, session, _, ch, storage = env
+    runner = ToolRunner(ToolSettings(tools={"python": ToolSpec(mode="native", guard="none")}), storage)
+    turn = {"n": 0}
+
+    def parallel_model(messages, info):
+        if turn["n"] == 0:
+            turn["n"] += 1
+            # Emit 4 concurrent tool calls in one response (just like real LLMs do)
+            return ModelResponse(parts=[
+                ToolCallPart(tool_name="run_tool", args=json.dumps({"tool": "python", "args": ["-c", "print('a')"]}), tool_call_id="c1"),
+                ToolCallPart(tool_name="run_tool", args=json.dumps({"tool": "python", "args": ["-c", "print('b')"]}), tool_call_id="c2"),
+                ToolCallPart(tool_name="run_tool", args=json.dumps({"tool": "python", "args": ["-c", "print('c')"]}), tool_call_id="c3"),
+                ToolCallPart(tool_name="run_tool", args=json.dumps({"tool": "python", "args": ["-c", "print('d')"]}), tool_call_id="c4"),
+            ])
+        return ModelResponse(parts=[
+            ToolCallPart(
+                tool_name="final_result",
+                args=json.dumps({"status": "SOLVED", "flag_candidate": "CTF{parallel_ok}", "findings": ["all 4 ran"], "tools_used": ["python"]}),
+            )
+        ])
+
+    spec = SpecialistRunner(FunctionModel(parallel_model), persona_text="crypto")
+    rep = spec.run(session, ch, TaskOrder(category="crypto", task="parallel", max_tool_runs=5), runner)
+    assert rep.status == "SOLVED"
+    assert rep.flag_candidate == "CTF{parallel_ok}"

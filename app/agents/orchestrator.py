@@ -575,6 +575,10 @@ class Orchestrator:
                 report = specialist.run(session, challenge, order, runner=self.runner)
                 usage_suffix = self._accumulate_usage(agent_session, specialist)
             except Exception as exc:  # model/tool failure must not kill the loop
+                try:
+                    session.rollback()
+                except Exception:
+                    pass
                 report = SpecialistReport(
                     status="FAILED",
                     findings=[f"specialist crashed: {type(exc).__name__}: {exc}"],

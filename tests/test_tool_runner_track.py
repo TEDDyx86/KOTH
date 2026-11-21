@@ -4,7 +4,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from app.models import Attempt, AttemptResult, Attachment, Challenge, Event
 from app.services import tracking
 from app.services.storage import StorageService
-from app.tooling.config import load_tools_config
+from app.tooling.config import ToolSettings, ToolSpec
 from app.tooling.runner import ToolRunner
 
 
@@ -26,7 +26,8 @@ def env(tmp_path):
 
 def test_run_persists_attempt_and_attachment(tmp_path, env):
     session, ch = env
-    runner = ToolRunner(load_tools_config(), StorageService(tmp_path / "storage"))
+    cfg = ToolSettings(tools={"python": ToolSpec(mode="native", guard="none")})
+    runner = ToolRunner(cfg, StorageService(tmp_path / "storage"))
     res = runner.run(session, ch, "python", ["-c", "print('tracked')"])
     assert res.attachment_id is not None and res.attempt_id is not None
 
@@ -40,3 +41,13 @@ def test_run_persists_attempt_and_attachment(tmp_path, env):
 
     summary = tracking.challenge_summary(session, ch)
     assert summary["attempt_count"] == 1
+
+
+def test_run_persists_stderr_in_attempt_learning(tmp_path, env):
+    session, ch = env
+    cfg = ToolSettings(tools={"python": ToolSpec(mode="native", guard="none")})
+    runner = ToolRunner(cfg, StorageService(tmp_path / "storage"))
+    res = runner.run(session, ch, "python", ["-c", "import sys; sys.stderr.write('boom_err\\n'); sys.exit(2)"])
+    assert res.returncode == 2
+    attempt = session.get(Attempt, res.attempt_id)
+    assert "[stderr] boom_err" in attempt.learning

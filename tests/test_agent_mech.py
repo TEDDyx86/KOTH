@@ -64,7 +64,13 @@ def test_recon_bundle_strings_attachment(env, tmp_path):
     session.add(att)
     session.commit()
 
-    runner = ToolRunner(load_tools_config(), storage)
+    from app.tooling.config import ToolSettings, ToolSpec
+
+    cfg = ToolSettings(tools={
+        "strings": ToolSpec(mode="native", guard="strict"),
+        "nmap": ToolSpec(mode="native", guard="strict"),
+    })
+    runner = ToolRunner(cfg, storage)
     digest = recon_bundle(runner, session, ch, storage=storage)
 
     assert "flag_hint_here_xyz" in digest.summary

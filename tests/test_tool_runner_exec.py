@@ -3,7 +3,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app.models import Challenge, Event
 from app.services.storage import StorageService
-from app.tooling.config import load_tools_config
+from app.tooling.config import ToolSettings, ToolSpec
 from app.tooling.runner import ToolRunner
 
 
@@ -24,7 +24,8 @@ def env(tmp_path):
 
 
 def _runner(tmp_path):
-    return ToolRunner(load_tools_config(), StorageService(tmp_path / "storage"))
+    cfg = ToolSettings(tools={"python": ToolSpec(mode="native", guard="none")})
+    return ToolRunner(cfg, StorageService(tmp_path / "storage"))
 
 
 def test_run_python_captures_output(tmp_path, env):

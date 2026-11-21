@@ -1,9 +1,13 @@
-from app.tooling.config import load_tools_config
+from app.tooling.config import ToolSettings, ToolSpec, load_tools_config
 from app.tooling.doctor import inventory
 
 
 def test_inventory_marks_present_tools():
-    rows = inventory(load_tools_config())
+    cfg = ToolSettings(tools={
+        "python": ToolSpec(mode="native", guard="none"),
+        "nmap": ToolSpec(mode="native", guard="strict"),
+    })
+    rows = inventory(cfg)
     by_name = {r["name"]: r for r in rows}
     assert by_name["python"]["present"] is True
     assert by_name["python"]["path"] is not None
