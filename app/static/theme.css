@@ -470,19 +470,37 @@ a:hover { color: var(--accent-bright); }
   border-bottom: 1px solid var(--panel-edge);
 }
 
+.koth-brand-frame {
+  display: block;
+  border-radius: 10px;
+  border: 1px solid var(--panel-edge-strong);
+  overflow: hidden;
+  background: var(--bg-0);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+}
+
 .koth-brand-banner {
   width: 100%;
   height: auto;
   aspect-ratio: 16 / 9;
   object-fit: cover;
-  border-radius: 10px;
-  border: 1px solid var(--panel-edge-strong);
   display: block;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
   filter: hue-rotate(var(--bg-hue)) saturate(var(--bg-sat));
 }
 
-.koth-mobile-bar img {
+.koth-brand-mobile {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+  border: 1px solid var(--panel-edge-strong);
+  overflow: hidden;
+  background: var(--bg-0);
+}
+
+.koth-brand-mobile img {
+  height: 34px;
+  width: auto;
+  display: block;
   filter: hue-rotate(var(--bg-hue)) saturate(var(--bg-sat));
 }
 

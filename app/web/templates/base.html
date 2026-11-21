@@ -11,8 +11,8 @@
 </head>
 <body>
   <div class="koth-mobile-bar">
-    <a href="/" style="display:flex; align-items:center;">
-      <img src="/static/brand/koth_brand_lockup.jpg" alt="KOTH — King Of The Hill" style="height:34px; width:auto; border-radius:6px; border:1px solid var(--panel-edge-strong); display:block;">
+    <a href="/" class="koth-brand-mobile" aria-label="KOTH — King Of The Hill">
+      <img src="/static/brand/koth_brand_lockup.jpg" alt="KOTH — King Of The Hill">
     </a>
     <button class="btn ghost" type="button" onclick="document.getElementById('koth-sidebar').classList.toggle('open')">Menu</button>
   </div>
@@ -20,7 +20,9 @@
   <div class="koth-shell">
     <aside id="koth-sidebar" class="koth-sidebar">
       <a href="/" class="koth-brand" aria-label="KOTH — King Of The Hill">
-        <img class="koth-brand-banner" src="/static/brand/koth_brand_lockup.jpg" alt="KOTH — King Of The Hill">
+        <span class="koth-brand-frame">
+          <img class="koth-brand-banner" src="/static/brand/koth_brand_lockup.jpg" alt="KOTH — King Of The Hill">
+        </span>
       </a>
 
       <nav class="koth-nav-group" aria-label="Principal">
