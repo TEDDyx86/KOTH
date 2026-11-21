@@ -1,22 +1,55 @@
 {% extends "base.html" %}
 {% block title %}Dashboard — KOTH{% endblock %}
 {% block content %}
-<h1>Dashboard</h1>
+<header class="dash-header">
+  <div class="dash-title-group">
+    <h1>Dashboard</h1>
+    <div class="dash-telemetry mono tabular" aria-label="Resumo operacional">
+      <span><strong>{{ dash_stats.open_count }}</strong> abertos</span>
+      <span class="dash-sep" aria-hidden="true">·</span>
+      <span><strong>{{ dash_stats.solved_count }}/{{ dash_stats.total_count }}</strong> resolvidos</span>
+      <span class="dash-sep" aria-hidden="true">·</span>
+      <span><strong>{{ dash_stats.earned_pts }}</strong> pts</span>
+      {% if dash_stats.running_count %}
+        <span class="dash-sep" aria-hidden="true">·</span>
+        <span class="dash-live"><span class="koth-dot"></span>{{ dash_stats.running_count }} em execução</span>
+      {% endif %}
+      {% if dash_stats.awaiting_count %}
+        <span class="dash-sep" aria-hidden="true">·</span>
+        <span class="badge warn">{{ dash_stats.awaiting_count }} checkpoint</span>
+      {% endif %}
+      <span class="dash-sep" aria-hidden="true">·</span>
+      <span>sandbox <strong class="dash-mode">{{ sandbox_mode }}</strong></span>
+    </div>
+  </div>
+  <div class="row-actions">
+    <button type="button" class="btn" id="dash-toggle-launch" aria-expanded="{{ 'true' if dash_stats.open_count == 0 else 'false' }}" onclick="kothToggleLaunch()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+      <span>Novo challenge</span>
+    </button>
+    <a class="btn ghost" href="/">Terminal OP →</a>
+  </div>
+</header>
 
-<section class="card">
-  <h2>Novo challenge rápido</h2>
-  <p style="color: var(--muted); font-size: 0.85rem; margin-top: -0.4rem;">
-    Crie o challenge, anexe os arquivos e vá direto ao Painel do Agente em 1 passo.
-  </p>
-  <form method="post" action="/challenges/quick" enctype="multipart/form-data" style="display:grid; gap:0.6rem;">
+<section id="dash-quick-launch" class="card dash-launch-panel {% if dash_stats.open_count > 0 %}is-collapsed{% endif %}">
+  <div class="dash-card-head">
+    <div>
+      <h2>Novo challenge rápido</h2>
+      <p class="dash-sub">Crie o challenge, anexe arquivos e envie direto ao Orquestrador em 1 passo.</p>
+    </div>
+    {% if dash_stats.open_count > 0 %}
+      <button type="button" class="btn ghost dash-close-btn" onclick="kothToggleLaunch(false)" aria-label="Recolher formulário">Fechar</button>
+    {% endif %}
+  </div>
+  <form method="post" action="/challenges/quick" enctype="multipart/form-data" class="dash-launch-form">
     <div class="form-grid">
-      <select name="event_id">
+      <select name="event_id" aria-label="Evento existente">
         {% for ev in event_list %}
           <option value="{{ ev.id }}" {% if loop.last %}selected{% endif %}>{{ ev.name }}{% if ev.flag_format %} ({{ ev.flag_format }}){% endif %}</option>
         {% endfor %}
         <option value="">+ criar evento automático ("CTF Local")</option>
       </select>
-      <input name="new_event_name" placeholder="ou digite um novo nome de evento (opcional)">
+      <input name="new_event_name" placeholder="ou digite um novo nome de evento (opcional)" aria-label="Novo nome de evento">
     </div>
     {% set ch = none %}
     {% include "_challenge_fields.html" %}
@@ -28,57 +61,229 @@
   </form>
 </section>
 
-<section class="card">
-  <h2>Eventos</h2>
-  {% for event, solved, total in events %}
-    <div style="margin-bottom: 0.6rem;">
-      <a href="/events/{{ event.id }}">{{ event.name }}</a>
-      <span class="badge">{{ event.status.value }}</span>
-      {% if event.flag_format %}<small class="mono" style="color: var(--muted);">{{ event.flag_format }}</small>{% endif %}
-      <div class="meter" style="max-width: 320px;">
-        <span style="width: {{ (100 * solved / total) if total else 0 }}%;"></span>
+<div class="dash-grid">
+  <div class="dash-col-primary">
+    <section class="card">
+      <div class="dash-card-head">
+        <div class="dash-card-title-row">
+          <h2>Challenges abertos</h2>
+          <span class="badge tabular" id="dash-visible-count">{{ open_challenges|length }}</span>
+        </div>
+        {% if open_challenges %}
+          <div class="dash-search-wrap">
+            <input id="dash-chal-search" type="search" placeholder="Filtrar título, target ou tag…" aria-label="Filtrar challenges abertos" oninput="kothFilterChallenges()">
+          </div>
+        {% endif %}
       </div>
-      <small style="color: var(--muted);">{{ solved }}/{{ total }} resolvidos</small>
-    </div>
-  {% else %}
-    <p style="color: var(--muted);">Nenhum evento ainda.</p>
-  {% endfor %}
-  <form method="post" action="/events" class="form-grid" style="max-width:680px; margin-top:1rem;">
-    <input name="name" placeholder="Nome do evento (ex: IDP CTF 03)" required>
-    <input name="flag_format" placeholder="Regex da flag (ex: IDP\{.*\} — padrão CTF\{.*\})">
-    <button class="btn ghost" type="submit">Criar evento</button>
-  </form>
-</section>
 
-<section class="card">
-  <h2>Challenges abertos</h2>
-  <table class="list">
-    <tr><th>Título</th><th>Categoria</th><th>Pontos</th><th>Target</th><th>Status</th><th></th></tr>
-    {% for c in open_challenges %}
-      <tr>
-        <td><a href="/challenges/{{ c.id }}">{{ c.title }}</a></td>
-        <td>{{ c.category }}</td>
-        <td>{{ c.points }}</td>
-        <td class="mono" style="font-size:0.85rem; color:var(--muted);">{{ c.target or "—" }}</td>
-        <td><span class="badge">{{ c.status.value }}</span></td>
-        <td><a class="btn ghost" style="padding:0.2rem 0.6rem; font-size:0.8rem;" href="/challenges/{{ c.id }}/agent">Agente →</a></td>
-      </tr>
-    {% else %}
-      <tr><td colspan="6" style="color: var(--muted);">Nada aberto.</td></tr>
-    {% endfor %}
-  </table>
-</section>
+      {% if open_categories|length > 1 %}
+      <div class="dash-filter-bar" role="group" aria-label="Filtrar por categoria">
+        <button type="button" class="dash-chip active" data-cat="" onclick="kothSetCategory(this, '')">Todas</button>
+        {% for cat in open_categories %}
+          <button type="button" class="dash-chip" data-cat="{{ cat }}" onclick="kothSetCategory(this, '{{ cat }}')">{{ cat }}</button>
+        {% endfor %}
+      </div>
+      {% endif %}
 
-<section class="card">
-  <h2>Atividade recente</h2>
-  <ul>
-    {% for a in recent_attempts %}
-      <li class="mono" style="font-size: 0.85rem;">
-        [{{ a.timestamp.strftime("%H:%M") }}] {{ a.type.value }} — {{ a.description }} → {{ a.result.value }}
-      </li>
-    {% else %}
-      <li style="color: var(--muted);">Sem tentativas ainda.</li>
-    {% endfor %}
-  </ul>
-</section>
+      <div class="table-scroll">
+        <table class="list dash-table" id="dash-open-table">
+          <thead>
+            <tr>
+              <th>Challenge</th>
+              <th>Categoria</th>
+              <th>Pts</th>
+              <th>Target</th>
+              <th>Agente</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for c in open_challenges %}
+            {% set st = challenge_states.get(c.id) %}
+            <tr class="dash-chal-row"
+                data-cat="{{ (c.category or 'misc')|lower }}"
+                data-search="{{ (c.title ~ ' ' ~ (c.target or '') ~ ' ' ~ (c.tags or '') ~ ' ' ~ (c.category or ''))|lower }}">
+              <td>
+                <div class="dash-chal-name">
+                  <a href="/challenges/{{ c.id }}">{{ c.title }}</a>
+                  {% if c.difficulty %}
+                    <span class="dash-diff mono">{{ c.difficulty.value }}</span>
+                  {% endif %}
+                </div>
+                {% if c.tags %}
+                  <div class="dash-tags mono">{{ c.tags }}</div>
+                {% endif %}
+              </td>
+              <td><span class="badge">{{ c.category }}</span></td>
+              <td class="mono tabular">{{ c.points }}</td>
+              <td class="mono dash-target">{{ c.target or "—" }}</td>
+              <td>
+                {% if st and st.state == "running" %}
+                  <span class="badge warn mono">rodando ({{ st.dispatch_count }})</span>
+                {% elif st and st.state == "awaiting_approval" %}
+                  <span class="badge warn mono">checkpoint</span>
+                {% elif st %}
+                  <span class="badge solved mono">{{ st.state }}</span>
+                {% else %}
+                  <span class="dash-idle mono">pronto</span>
+                {% endif %}
+              </td>
+              <td class="dash-row-action">
+                {% if st and st.state == "awaiting_approval" %}
+                  <a class="btn" style="padding:0.25rem 0.65rem; font-size:0.8rem;" href="/challenges/{{ c.id }}/agent">Aprovar →</a>
+                {% else %}
+                  <a class="btn ghost" style="padding:0.25rem 0.65rem; font-size:0.8rem;" href="/challenges/{{ c.id }}/agent">Agente →</a>
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr class="dash-empty-row">
+              <td colspan="6">
+                <div class="dash-empty">
+                  <p>Nenhum challenge aberto no momento.</p>
+                  <p class="dash-sub">Use o formulário acima ou envie <span class="mono">/solve Título | cat=web | target=host:porta</span> no <a href="/">Terminal OP</a>.</p>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+            <tr id="dash-no-match-row" style="display:none;">
+              <td colspan="6">
+                <div class="dash-empty">
+                  <p>Nenhum challenge corresponde ao filtro atual.</p>
+                  <button type="button" class="btn ghost" onclick="kothResetFilter()">Limpar filtro</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <div class="dash-col-secondary">
+    <section class="card">
+      <div class="dash-card-head">
+        <h2>Eventos</h2>
+        <span class="badge tabular">{{ event_cards|length }}</span>
+      </div>
+      <div class="dash-event-list">
+        {% for item in event_cards %}
+          {% set ev = item.event %}
+          <div class="dash-event-item">
+            <div class="dash-event-top">
+              <a class="dash-event-name" href="/events/{{ ev.id }}">{{ ev.name }}</a>
+              <span class="badge {% if ev.status.value == 'active' %}flag-ok{% else %}solved{% endif %}">{{ ev.status.value }}</span>
+            </div>
+            <div class="meter" style="margin: 0.4rem 0 0.3rem;">
+              <span style="width: {{ item.pct }}%;"></span>
+            </div>
+            <div class="dash-event-meta mono tabular">
+              <span>{{ item.solved }}/{{ item.total }} resolvidos ({{ item.pct }}%)</span>
+              <span>{{ item.earned_pts }}/{{ item.total_pts }} pts</span>
+            </div>
+            {% if ev.flag_format %}
+              <div class="dash-event-fmt mono">flag: {{ ev.flag_format }}</div>
+            {% endif %}
+          </div>
+        {% else %}
+          <p class="dash-sub" style="margin-bottom:0.65rem;">Nenhum evento criado ainda. Crie o primeiro abaixo:</p>
+        {% endfor %}
+      </div>
+
+      <details class="dash-inline-create" {% if not event_cards %}open{% endif %}>
+        <summary class="mono">+ Criar novo evento</summary>
+        <form method="post" action="/events" class="dash-event-form">
+          <input name="name" placeholder="Nome do evento (ex: IDP CTF 03)" required>
+          <input name="flag_format" placeholder="Regex da flag (ex: IDP\{.*\} — padrão CTF\{.*\})">
+          <button class="btn ghost" type="submit">Criar evento</button>
+        </form>
+      </details>
+    </section>
+
+    <section class="card">
+      <div class="dash-card-head">
+        <h2>Atividade recente</h2>
+        <span class="badge tabular">{{ recent_attempts|length }}</span>
+      </div>
+      <ul class="dash-feed">
+        {% for a in recent_attempts %}
+          {% set ch = challenge_map.get(a.challenge_id) %}
+          {% set res_val = a.result.value %}
+          <li class="dash-feed-item">
+            <div class="dash-feed-top">
+              <span class="mono tabular dash-time">{{ a.timestamp.strftime("%H:%M") }}</span>
+              {% if ch %}
+                <a class="dash-feed-chal" href="/challenges/{{ ch.id }}/agent">{{ ch.title }}</a>
+              {% else %}
+                <span class="dash-feed-chal">#{{ a.challenge_id }}</span>
+              {% endif %}
+              <span class="badge mono {% if res_val in ('breakthrough', 'flag_accepted') %}flag-ok{% elif res_val == 'partial' %}warn{% else %}solved{% endif %}">{{ res_val }}</span>
+            </div>
+            <div class="dash-feed-desc" title="{{ a.description }}">
+              <span class="mono dash-type">{{ a.type.value }}</span>
+              <span>{{ a.description[:95] }}{% if a.description|length > 95 %}…{% endif %}</span>
+            </div>
+          </li>
+        {% else %}
+          <li class="dash-sub" style="list-style:none;">Sem tentativas registradas ainda.</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+</div>
+
+<script>
+(function () {
+  var activeCat = '';
+
+  window.kothToggleLaunch = function (forceState) {
+    var panel = document.getElementById('dash-quick-launch');
+    var btn = document.getElementById('dash-toggle-launch');
+    if (!panel || !btn) return;
+    var show = typeof forceState === 'boolean' ? forceState : panel.classList.contains('is-collapsed');
+    panel.classList.toggle('is-collapsed', !show);
+    btn.setAttribute('aria-expanded', show ? 'true' : 'false');
+    if (show) {
+      var titleInput = panel.querySelector('input[name="title"]');
+      if (titleInput) titleInput.focus();
+    }
+  };
+
+  window.kothSetCategory = function (btn, cat) {
+    activeCat = (cat || '').toLowerCase();
+    document.querySelectorAll('.dash-chip').forEach(function (el) {
+      el.classList.toggle('active', el === btn);
+    });
+    window.kothFilterChallenges();
+  };
+
+  window.kothResetFilter = function () {
+    activeCat = '';
+    var input = document.getElementById('dash-chal-search');
+    if (input) input.value = '';
+    document.querySelectorAll('.dash-chip').forEach(function (el) {
+      el.classList.toggle('active', el.getAttribute('data-cat') === '');
+    });
+    window.kothFilterChallenges();
+  };
+
+  window.kothFilterChallenges = function () {
+    var input = document.getElementById('dash-chal-search');
+    var q = (input ? input.value : '').trim().toLowerCase();
+    var rows = document.querySelectorAll('#dash-open-table tbody tr.dash-chal-row');
+    var shown = 0;
+    rows.forEach(function (row) {
+      var rCat = row.getAttribute('data-cat') || '';
+      var rText = row.getAttribute('data-search') || '';
+      var match = (!activeCat || rCat === activeCat) && (!q || rText.indexOf(q) !== -1);
+      row.style.display = match ? '' : 'none';
+      if (match) shown += 1;
+    });
+    var counter = document.getElementById('dash-visible-count');
+    if (counter) counter.textContent = String(shown);
+    var empty = document.getElementById('dash-no-match-row');
+    if (empty) empty.style.display = (rows.length > 0 && shown === 0) ? '' : 'none';
+  };
+})();
+</script>
 {% endblock %}

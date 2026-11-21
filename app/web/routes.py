@@ -196,14 +196,76 @@ def cli_message(request: Request,
 def dashboard(request: Request, session: Session = Depends(get_session)):
     ctx = nav_context(session, active_nav="dashboard")
     events = tracking.list_events(session)
+    all_challenges = tracking.list_challenges(session)
+    challenge_map = {c.id: c for c in all_challenges}
     recent = list(session.exec(
         select(Attempt).order_by(Attempt.timestamp.desc()).limit(15)
     ).all())
+
+    orch = _safe_orchestrator(request)
+    challenge_states: dict[int, dict] = {}
+    running_count = 0
+    awaiting_count = 0
+    for ch in ctx["nav_open_challenges"]:
+        if orch is not None and hasattr(orch, "latest_for_challenge"):
+            sess = orch.latest_for_challenge(session, ch.id)
+            if sess is not None:
+                st = sess.state
+                challenge_states[ch.id] = {
+                    "state": st,
+                    "dispatch_count": sess.dispatch_count,
+                }
+                if st == "running":
+                    running_count += 1
+                elif st == "awaiting_approval":
+                    awaiting_count += 1
+
+    event_cards = []
+    for ev in events:
+        chs = [c for c in all_challenges if c.event_id == ev.id]
+        solved_chs = [c for c in chs if c.status is ChallengeStatus.solved]
+        total_pts = sum(int(c.points or 0) for c in chs)
+        earned_pts = sum(int(c.points or 0) for c in solved_chs)
+        pct = round(100 * len(solved_chs) / len(chs)) if chs else 0
+        event_cards.append({
+            "event": ev,
+            "solved": len(solved_chs),
+            "total": len(chs),
+            "open_count": len(chs) - len(solved_chs),
+            "earned_pts": earned_pts,
+            "total_pts": total_pts,
+            "pct": pct,
+        })
+
+    solved_total = sum(1 for c in all_challenges if c.status is ChallengeStatus.solved)
+    earned_total_pts = sum(
+        int(c.points or 0) for c in all_challenges if c.status is ChallengeStatus.solved
+    )
+    total_pts_all = sum(int(c.points or 0) for c in all_challenges)
+    open_categories = sorted({
+        (c.category or "misc").strip().lower() for c in ctx["nav_open_challenges"]
+    })
+
     ctx.update({
         "events": ctx["nav_events"],
+        "event_cards": event_cards,
         "event_list": events,
         "open_challenges": ctx["nav_open_challenges"],
+        "challenge_states": challenge_states,
+        "challenge_map": challenge_map,
+        "open_categories": open_categories,
         "recent_attempts": recent,
+        "sandbox_mode": current_sandbox_mode(TOOLS_PATH),
+        "dash_stats": {
+            "open_count": len(ctx["nav_open_challenges"]),
+            "solved_count": solved_total,
+            "total_count": len(all_challenges),
+            "earned_pts": earned_total_pts,
+            "total_pts": total_pts_all,
+            "running_count": running_count,
+            "awaiting_count": awaiting_count,
+            "events_count": len(events),
+        },
     })
     return templates.TemplateResponse(request, "dashboard.html", ctx)
 
