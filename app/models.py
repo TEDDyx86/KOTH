@@ -116,6 +116,7 @@ class AgentSessionRecord(SQLModel, table=True):
     reports_json: str = "[]"
     final_report_json: str | None = None
     error: str | None = None
+    total_tokens: int = 0
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

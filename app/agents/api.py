@@ -19,7 +19,7 @@ from .specialists import SpecialistRunner
 
 router = APIRouter()
 
-SPECIALIST_CATEGORIES = ("web", "pwn", "crypto", "reversing", "forensics", "osint")
+SPECIALIST_CATEGORIES = ("web", "pwn", "crypto", "reversing", "forensics", "osint", "misc")
 
 
 def _persona_text(name: str) -> str:

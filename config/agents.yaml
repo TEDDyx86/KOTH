@@ -32,6 +32,9 @@ roles:
   specialist_osint:
     persona: personas/specialist_osint.md
     model: fast
+  specialist_misc:
+    persona: personas/specialist_misc.md
+    model: fast
 
 limits:
   max_attempts: 12

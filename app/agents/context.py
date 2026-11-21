@@ -47,7 +47,7 @@ def _note_lines(session: Session, challenge: Challenge) -> list[str]:
     return [f"- [{n.id}] {n.content}" for n in reversed(notes)]
 
 
-def _attempt_lines(session: Session, challenge: Challenge, learning_clip: int = 200) -> list[str]:
+def _attempt_lines(session: Session, challenge: Challenge, learning_clip: int = 450) -> list[str]:
     rows = list(session.exec(
         select(Attempt).where(Attempt.challenge_id == challenge.id).order_by(Attempt.id.desc())
     ).all())
@@ -98,6 +98,11 @@ def specialist_context(session: Session, challenge: Challenge, order,
             parts.append(f"- {h['title']} ({h['path']}): {h['snippet']}")
     parts.append("## Artifacts (download files are staged in sandbox cwd by filename)")
     parts += (_artifact_lines(session, challenge, in_sandbox=True) or ["(none)"])
+    if session is not None:
+        recent = _attempt_lines(session, challenge, learning_clip=320)[-6:]
+        if recent:
+            parts.append("## Recent attempts & outputs (do not repeat identical commands)")
+            parts += recent
     return _truncate("\n".join(parts), budget)
 
 

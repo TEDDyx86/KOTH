@@ -29,8 +29,8 @@
 {% else %}
 <div class="card">
   <h3>Status <span class="badge {{ sess.state|badge_for }}">{{ sess.state }}</span></h3>
-  <p class="mono" style="color: var(--muted); font-size: 0.8rem;">
-    modo: {{ sess.mode or 'supervised' }} · dispatches: {{ sess.dispatch_count or 0 }}
+  <p class="mono tabular" style="color: var(--muted); font-size: 0.8rem;">
+    modo: {{ sess.mode or 'supervised' }} · dispatches: {{ sess.dispatch_count or 0 }}{% if sess.total_tokens %} · tokens: {{ sess.total_tokens }}{% endif %}
   </p>
   {% if sess.error %}
   <p class="mono" style="color: var(--accent);">erro: {{ sess.error }}</p>

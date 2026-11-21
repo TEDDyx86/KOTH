@@ -14,6 +14,18 @@ from .planner import check_stop_criteria, reassess_strategy
 from .recon import recon_bundle
 from .submission import validate_flag
 
+CATEGORY_ALIASES: dict[str, str] = {
+    "reverse": "reversing",
+    "rev": "reversing",
+    "binary": "reversing",
+    "stego": "forensics",
+    "pcap": "forensics",
+    "network": "forensics",
+    "ai": "misc",
+    "ai-ml": "misc",
+    "custom": "misc",
+}
+
 
 @dataclass
 class AgentSession:
@@ -28,7 +40,9 @@ class AgentSession:
     dispatch_count: int = 0
     final_report: FinalReport | None = None
     error: str | None = None
+    total_tokens: int = 0
     stop_requested: bool = False
+    last_recon_sig: tuple[tuple[str, int], ...] | None = field(default=None, repr=False)
 
     def to_dict(self) -> dict:
         return {
@@ -37,6 +51,7 @@ class AgentSession:
             "state": self.state,
             "mode": self.mode,
             "dispatch_count": self.dispatch_count,
+            "total_tokens": self.total_tokens,
             "pending_decision": (self.pending_decision.model_dump()
                                  if self.pending_decision else None),
             "findings": self.findings,
@@ -71,6 +86,7 @@ def _record_to_session(rec: AgentSessionRecord) -> AgentSession:
         dispatch_count=rec.dispatch_count,
         final_report=final_report,
         error=rec.error,
+        total_tokens=int(getattr(rec, "total_tokens", 0) or 0),
     )
 
 
@@ -87,10 +103,20 @@ class Orchestrator:
         self.specialists = specialists  # category -> SpecialistRunner
         self.limits = agents_limits or {}
         self.sessions: dict[str, AgentSession] = {}
+        self._lock = threading.RLock()
+        self._active_workers: dict[str, int] = {}  # session_id -> challenge_id
 
     # -- persistence & helpers ---------------------------------------------
     def _save(self, session: Session | None, sess: AgentSession) -> None:
-        self.sessions[sess.id] = sess
+        with self._lock:
+            self.sessions[sess.id] = sess
+            snapshot = sess.to_dict()
+            pending_json = (
+                sess.pending_decision.model_dump_json() if sess.pending_decision else None
+            )
+            final_json = (
+                sess.final_report.model_dump_json() if sess.final_report else None
+            )
         if session is None:
             return
         try:
@@ -102,27 +128,37 @@ class Orchestrator:
                     challenge_id=sess.challenge_id,
                     created_at=sess.created_at,
                 )
-            rec.state = sess.state
-            rec.mode = sess.mode
-            rec.dispatch_count = sess.dispatch_count
-            rec.pending_decision_json = (
-                sess.pending_decision.model_dump_json() if sess.pending_decision else None
-            )
-            rec.findings_json = json.dumps(sess.findings)
-            rec.reports_json = json.dumps([r.model_dump() for r in sess.reports])
-            rec.final_report_json = (
-                sess.final_report.model_dump_json() if sess.final_report else None
-            )
-            rec.error = sess.error
+            rec.state = snapshot["state"]
+            rec.mode = snapshot["mode"]
+            rec.dispatch_count = snapshot["dispatch_count"]
+            rec.total_tokens = snapshot["total_tokens"]
+            rec.pending_decision_json = pending_json
+            rec.findings_json = json.dumps(snapshot["findings"])
+            rec.reports_json = json.dumps(snapshot["reports"])
+            rec.final_report_json = final_json
+            rec.error = snapshot["error"]
             rec.updated_at = now
             session.add(rec)
             session.commit()
         except Exception:
             session.rollback()
 
+    def _recover_if_orphaned(self, session: Session | None, sess: AgentSession) -> AgentSession:
+        with self._lock:
+            if sess.state == "running" and sess.id not in self._active_workers:
+                if sess.pending_decision is not None:
+                    sess.state = "awaiting_approval"
+                    sess.error = sess.error or "sessão recuperada após reinício (aguardando aprovação)"
+                else:
+                    sess.state = "rejected"
+                    sess.error = sess.error or "sessão interrompida por reinício do servidor"
+                self._save(session, sess)
+        return sess
+
     def get_session(self, session: Session | None, session_id: str) -> AgentSession | None:
-        if session_id in self.sessions:
-            return self.sessions[session_id]
+        with self._lock:
+            if session_id in self.sessions:
+                return self.sessions[session_id]
         if session is None:
             return None
         try:
@@ -132,11 +168,14 @@ class Orchestrator:
         if rec is None:
             return None
         sess = _record_to_session(rec)
-        self.sessions[sess.id] = sess
-        return sess
+        with self._lock:
+            self.sessions[sess.id] = sess
+        return self._recover_if_orphaned(session, sess)
 
     def latest_for_challenge(self, session: Session | None, challenge_id: int) -> AgentSession | None:
-        matches = [s for s in self.sessions.values() if s.challenge_id == challenge_id]
+        with self._lock:
+            matches = [s for s in self.sessions.values() if s.challenge_id == challenge_id]
+            known_ids = set(self.sessions.keys())
         if session is not None:
             try:
                 recs = list(session.exec(
@@ -145,9 +184,11 @@ class Orchestrator:
                     )
                 ).all())
                 for rec in recs:
-                    if rec.id not in self.sessions:
+                    if rec.id not in known_ids:
                         s = _record_to_session(rec)
-                        self.sessions[s.id] = s
+                        with self._lock:
+                            self.sessions[s.id] = s
+                        self._recover_if_orphaned(session, s)
                         matches.append(s)
             except Exception:
                 pass
@@ -160,13 +201,25 @@ class Orchestrator:
         return challenge
 
     def _accumulate(self, sess: AgentSession, findings: list[str]) -> None:
-        for f in findings:
-            if f and f not in sess.findings:
-                sess.findings.append(f)
+        with self._lock:
+            for f in findings:
+                if f and f not in sess.findings:
+                    sess.findings.append(f)
+
+    def _sandbox_signature(self, challenge: Challenge) -> tuple[tuple[str, int], ...]:
+        if self.runner is None or not hasattr(self.runner, "sandbox_workdir"):
+            return ()
+        try:
+            wd = self.runner.sandbox_workdir(challenge)
+            return tuple(
+                sorted((p.name, p.stat().st_size) for p in wd.iterdir() if p.is_file())
+            )
+        except Exception:
+            return ()
 
     def _build_final_report(self, challenge_id: int, sess: AgentSession,
                             status: str, flag_candidate: str | None = None) -> FinalReport:
-        summary = [f"dispatches={sess.dispatch_count}"]
+        summary = [f"dispatches={sess.dispatch_count}", f"tokens={sess.total_tokens}"]
         summary.extend(sess.findings[-10:])
         report = FinalReport(
             challenge_id=challenge_id,
@@ -177,11 +230,27 @@ class Orchestrator:
         sess.final_report = report
         return report
 
-    def _usage_note(self, agent_obj) -> str:
+    def _accumulate_usage(self, sess: AgentSession, agent_obj) -> str:
         usage = getattr(agent_obj, "last_usage", None)
         if not usage:
             return ""
-        return f" | tokens(in={usage.get('input_tokens', 0)},out={usage.get('output_tokens', 0)})"
+        inp = int(usage.get("input_tokens", 0) or 0)
+        out = int(usage.get("output_tokens", 0) or 0)
+        tot = int(usage.get("total_tokens", 0) or (inp + out))
+        with self._lock:
+            sess.total_tokens += tot
+        return f" | tokens(in={inp},out={out})"
+
+    def _resolve_specialist(self, category: str) -> tuple[str, object | None, str | None]:
+        raw = (category or "misc").strip().lower()
+        if raw in self.specialists:
+            return raw, self.specialists[raw], None
+        aliased = CATEGORY_ALIASES.get(raw)
+        if aliased and aliased in self.specialists:
+            return aliased, self.specialists[aliased], f"category '{raw}' routed to '{aliased}'"
+        if "misc" in self.specialists:
+            return "misc", self.specialists["misc"], f"category '{raw}' routed to fallback 'misc'"
+        return raw, None, None
 
     def _decide(self, session: Session, challenge: Challenge,
                 sess: AgentSession, extra_feedback: str | None = None) -> None:
@@ -205,6 +274,7 @@ class Orchestrator:
 
         decision = self.jury.decide(session, challenge, sess.reports,
                                     extra_feedback=extra_feedback)
+        self._accumulate_usage(sess, self.jury)
         if sess.stop_requested or sess.state == "rejected":
             sess.state = "rejected"
             sess.pending_decision = None
@@ -223,6 +293,8 @@ class Orchestrator:
         if decision is None:
             return True
 
+        extra_feedback: str | None = None
+
         if decision.action == "GIVE_UP":
             agent_session.state = "gave_up"
             agent_session.pending_decision = None
@@ -234,7 +306,23 @@ class Orchestrator:
 
         if decision.action == "DISPATCH":
             agent_session.dispatch_count += 1
-            self._dispatch(session, challenge, agent_session, decision)
+            last_report = self._dispatch(session, challenge, agent_session, decision)
+
+            # Fast-path in auto mode when specialist already produced a valid flag
+            cand = (last_report.flag_candidate or "").strip()
+            if agent_session.mode == "auto" and last_report.status == "SOLVED" and cand:
+                res = validate_flag(session, challenge, cand)
+                if res.accepted:
+                    agent_session.state = "solved"
+                    agent_session.pending_decision = None
+                    self._build_final_report(challenge.id, agent_session, "solved",
+                                             flag_candidate=cand)
+                    self._save(session, agent_session)
+                    return True
+                msg = f"specialist candidate {cand!r} rejected: {res.reason}"
+                self._accumulate(agent_session, [msg])
+                extra_feedback = msg
+
             action, reason = reassess_strategy(
                 agent_session.created_at,
                 agent_session.dispatch_count,
@@ -252,15 +340,25 @@ class Orchestrator:
                 return True
             if action == "RECON":
                 self._accumulate(agent_session, [reason])
-                digest = recon_bundle(self.runner, session, challenge)
-                self._accumulate(agent_session, [digest.summary] if digest.summary else [])
+                cur_sig = self._sandbox_signature(challenge)
+                if cur_sig != agent_session.last_recon_sig:
+                    digest = recon_bundle(self.runner, session, challenge)
+                    agent_session.last_recon_sig = cur_sig
+                    self._accumulate(agent_session, [digest.summary] if digest.summary else [])
+                pivot_msg = (
+                    "2 consecutive specialist dispatches FAILED. Pivot strategy: choose a "
+                    "different attack technique/category or check existing sandbox files instead "
+                    "of repeating failed commands."
+                )
+                extra_feedback = f"{extra_feedback}\n{pivot_msg}".strip() if extra_feedback else pivot_msg
 
         elif decision.action == "RECHECK":
             digest = recon_bundle(self.runner, session, challenge)
+            agent_session.last_recon_sig = self._sandbox_signature(challenge)
             self._accumulate(agent_session, [digest.summary] if digest.summary else [])
 
         elif decision.action == "SUBMIT":
-            candidate = decision.flag_candidate
+            candidate = (decision.flag_candidate or "").strip()
             if candidate:
                 result = validate_flag(session, challenge, candidate)
                 if result.accepted:
@@ -270,15 +368,20 @@ class Orchestrator:
                                              flag_candidate=candidate)
                     self._save(session, agent_session)
                     return True
-                self._accumulate(agent_session, [f"submission rejected: {result.reason}"])
+                msg = f"submission rejected ({candidate}): {result.reason}"
+                self._accumulate(agent_session, [msg])
+                extra_feedback = msg
+            else:
+                msg = "Jury chose SUBMIT without flag_candidate — supply a concrete flag or DISPATCH next step."
+                self._accumulate(agent_session, [msg])
+                extra_feedback = msg
 
         elif decision.action == "WAIT_USER":
-            if agent_session.mode == "auto":
-                agent_session.state = "awaiting_approval"
-                self._save(session, agent_session)
-                return True
+            agent_session.state = "awaiting_approval"
+            self._save(session, agent_session)
+            return True
 
-        self._decide(session, challenge, agent_session)
+        self._decide(session, challenge, agent_session, extra_feedback=extra_feedback)
         return agent_session.state in ("solved", "gave_up", "rejected")
 
     def _run_auto_loop(self, session: Session, challenge: Challenge,
@@ -300,7 +403,8 @@ class Orchestrator:
         challenge = self._get(session, challenge_id)
         digest = recon_bundle(self.runner, session, challenge)
         sess = AgentSession(id=uuid.uuid4().hex, challenge_id=challenge_id,
-                            state="running", mode=mode)
+                            state="running", mode=mode,
+                            last_recon_sig=self._sandbox_signature(challenge))
         self._save(session, sess)
         self._accumulate(sess, [digest.summary] if digest.summary else [])
         self._decide(session, challenge, sess)
@@ -322,7 +426,12 @@ class Orchestrator:
             agent_session.mode = mode
         agent_session.state = "running"
         self._save(session, agent_session)
-        self._step(session, challenge, agent_session)
+        if decision.action == "WAIT_USER":
+            # User approved continuing after WAIT_USER -> ask Jury for next action
+            self._decide(session, challenge, agent_session,
+                         extra_feedback="Operator resumed execution after WAIT_USER.")
+        else:
+            self._step(session, challenge, agent_session)
         if agent_session.mode == "auto" and agent_session.state == "awaiting_approval":
             self._run_auto_loop(session, challenge, agent_session)
         return agent_session
@@ -358,8 +467,12 @@ class Orchestrator:
     def start_background(self, engine, session: Session, challenge_id: int,
                          mode: str = "supervised") -> AgentSession:
         self._get(session, challenge_id)
-        sess = AgentSession(id=uuid.uuid4().hex, challenge_id=challenge_id,
-                            state="running", mode=mode)
+        with self._lock:
+            if challenge_id in self._active_workers.values():
+                raise ValueError(f"active background worker already running for challenge {challenge_id}")
+            sess = AgentSession(id=uuid.uuid4().hex, challenge_id=challenge_id,
+                                state="running", mode=mode)
+            self._active_workers[sess.id] = challenge_id
         self._save(session, sess)
 
         def _worker():
@@ -367,6 +480,7 @@ class Orchestrator:
                 with Session(engine) as bg_session:
                     challenge = self._get(bg_session, challenge_id)
                     digest = recon_bundle(self.runner, bg_session, challenge)
+                    sess.last_recon_sig = self._sandbox_signature(challenge)
                     self._accumulate(sess, [digest.summary] if digest.summary else [])
                     self._decide(bg_session, challenge, sess)
                     if mode == "auto" and sess.state == "awaiting_approval":
@@ -376,6 +490,9 @@ class Orchestrator:
                 sess.error = f"{type(exc).__name__}: {exc}"
                 with Session(engine) as err_session:
                     self._save(err_session, sess)
+            finally:
+                with self._lock:
+                    self._active_workers.pop(sess.id, None)
 
         threading.Thread(target=_worker, daemon=True).start()
         return sess
@@ -387,16 +504,24 @@ class Orchestrator:
             raise KeyError(session_id)
         if agent_session.pending_decision is None or agent_session.state not in ("awaiting_approval", "rejected"):
             raise ValueError(f"session {session_id} is not awaiting approval")
-        if mode in ("supervised", "auto"):
-            agent_session.mode = mode
-        agent_session.state = "running"
+        with self._lock:
+            if agent_session.challenge_id in self._active_workers.values():
+                raise ValueError(f"active background worker already running for challenge {agent_session.challenge_id}")
+            if mode in ("supervised", "auto"):
+                agent_session.mode = mode
+            agent_session.state = "running"
+            self._active_workers[agent_session.id] = agent_session.challenge_id
         self._save(session, agent_session)
 
         def _worker():
             try:
                 with Session(engine) as bg_session:
                     challenge = self._get(bg_session, agent_session.challenge_id)
-                    self._step(bg_session, challenge, agent_session)
+                    if agent_session.pending_decision and agent_session.pending_decision.action == "WAIT_USER":
+                        self._decide(bg_session, challenge, agent_session,
+                                     extra_feedback="Operator resumed execution after WAIT_USER.")
+                    else:
+                        self._step(bg_session, challenge, agent_session)
                     if agent_session.mode == "auto" and agent_session.state == "awaiting_approval":
                         self._run_auto_loop(bg_session, challenge, agent_session)
             except Exception as exc:
@@ -404,14 +529,19 @@ class Orchestrator:
                 agent_session.error = f"{type(exc).__name__}: {exc}"
                 with Session(engine) as err_session:
                     self._save(err_session, agent_session)
+            finally:
+                with self._lock:
+                    self._active_workers.pop(agent_session.id, None)
 
         threading.Thread(target=_worker, daemon=True).start()
         return agent_session
 
     def _dispatch(self, session: Session, challenge: Challenge,
-                  agent_session: AgentSession, decision: JuryDecision) -> None:
+                  agent_session: AgentSession, decision: JuryDecision) -> SpecialistReport:
         order = decision.order
-        specialist = self.specialists.get(order.category.lower())
+        resolved_cat, specialist, route_note = self._resolve_specialist(order.category)
+        if route_note:
+            self._accumulate(agent_session, [route_note])
         usage_suffix = ""
         if specialist is None:
             self._accumulate(agent_session,
@@ -421,17 +551,19 @@ class Orchestrator:
         else:
             try:
                 report = specialist.run(session, challenge, order, runner=self.runner)
-                usage_suffix = self._usage_note(specialist)
+                usage_suffix = self._accumulate_usage(agent_session, specialist)
             except Exception as exc:  # model/tool failure must not kill the loop
                 report = SpecialistReport(
                     status="FAILED",
                     findings=[f"specialist crashed: {type(exc).__name__}: {exc}"],
                     next_step="retry with corrected tool calls or a simpler task")
-        agent_session.reports.append(report)
+        with self._lock:
+            agent_session.reports.append(report)
         self._accumulate(agent_session, list(report.findings))
         learning = "; ".join(report.findings)[:1900] + usage_suffix
         tracking.record_attempt(
             session, challenge.id, AttemptType.agent,
-            f"specialist {order.category}: {report.status}",
+            f"specialist {resolved_cat}: {report.status}",
             AttemptResult.breakthrough if report.status == "SOLVED" else AttemptResult.partial,
             learning=learning[:2000])
+        return report

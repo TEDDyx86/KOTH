@@ -138,7 +138,9 @@ class ToolRunner:
                 raise UnsafeArg(f"shell metacharacter in arg: {arg!r}")
         allowed = set(_ALWAYS_OK)
         if challenge_target:
-            allowed.add(challenge_target.split(":")[0].lower())
+            host = challenge_target.split("://")[-1].split("/")[0].split(":")[0].lower()
+            if host:
+                allowed.add(host)
         for arg in args:
             is_url = bool(_URL_SCHEME.match(arg))
             for token in _IPV4.findall(arg):

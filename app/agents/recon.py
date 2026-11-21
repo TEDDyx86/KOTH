@@ -53,10 +53,26 @@ class ReconDigest:
     summary: str = ""
 
 
+def _run_optional_probe(runner, challenge, tool: str, args: list[str],
+                      *, timeout_s: int = 20) -> str | None:
+    """Run an adaptive recon probe only when `tool` is configured on runner.settings."""
+    settings = getattr(runner, "settings", None)
+    tools = getattr(settings, "tools", None) if settings is not None else None
+    if not tools or tool not in tools:
+        return None
+    try:
+        res = runner.run_raw(challenge, tool, args, timeout_s=timeout_s, output_limit_mb=1)
+        out = (res.stdout or "").strip()
+        return out if out else None
+    except Exception:
+        return None
+
+
 def recon_bundle(runner, session: Session, challenge: Challenge,
                  storage: StorageService | None = None) -> ReconDigest:
-    """Deterministic recon: file type + strings on each download artifact, nmap top
-    ports when the challenge has a target. Uses ToolRunner (guards enforced)."""
+    """Adaptive deterministic recon: file type + strings + targeted probes
+    (checksec/file for ELF, exiftool/binwalk for images, tshark for PCAP,
+    curl headers + nmap for network/web targets)."""
     digests: list[dict] = []
     summaries: list[str] = []
 
@@ -92,11 +108,35 @@ def recon_bundle(runner, session: Session, challenge: Challenge,
         if interesting:
             summaries.append(f"strings {att.name}: " + " | ".join(interesting[:8]))
 
+        # Adaptive type-specific probes when configured on ToolRunner
+        if ftype == "ELF binary":
+            f_out = _run_optional_probe(runner, challenge, "file", [staged_name], timeout_s=15)
+            if f_out:
+                summaries.append(f"file-detail {att.name}: {f_out.splitlines()[0][:180]}")
+            chk = _run_optional_probe(runner, challenge, "checksec", [f"--file={staged_name}"], timeout_s=20)
+            if chk:
+                summaries.append(f"checksec {att.name}: {' | '.join(chk.splitlines()[:6])[:300]}")
+        elif "image" in ftype:
+            ex = _run_optional_probe(runner, challenge, "exiftool", [staged_name], timeout_s=20)
+            if ex:
+                ex_lines = [ln.strip() for ln in ex.splitlines() if ln.strip()][:8]
+                summaries.append(f"exiftool {att.name}: {' | '.join(ex_lines)[:300]}")
+            bw = _run_optional_probe(runner, challenge, "binwalk", [staged_name], timeout_s=20)
+            if bw:
+                bw_lines = [ln.strip() for ln in bw.splitlines() if ln.strip()][:6]
+                summaries.append(f"binwalk {att.name}: {' | '.join(bw_lines)[:260]}")
+        elif "PCAP" in ftype:
+            ts = _run_optional_probe(runner, challenge, "tshark", ["-r", staged_name, "-q", "-z", "io,phs"], timeout_s=25)
+            if ts:
+                ts_lines = [ln.strip() for ln in ts.splitlines() if ln.strip()][:10]
+                summaries.append(f"tshark {att.name}: {' | '.join(ts_lines)[:300]}")
+
     target = challenge.target
     if target:
+        host = target.split("://")[-1].split("/")[0].split(":")[0]
         try:
             res = runner.run_raw(challenge, "nmap",
-                                 ["--top-ports", "100", target.split(":")[0]],
+                                 ["--top-ports", "100", host],
                                  timeout_s=120, output_limit_mb=1)
             open_lines = [ln for ln in res.stdout.splitlines() if "/tcp" in ln][:20]
             summaries.append(f"nmap {target}: " + ("; ".join(open_lines) if open_lines
@@ -104,6 +144,18 @@ def recon_bundle(runner, session: Session, challenge: Challenge,
             digests.append({"name": "nmap", "ports": open_lines})
         except Exception as exc:
             summaries.append(f"nmap {target}: skipped ({exc})")
+
+        lower_t = target.lower()
+        is_web_hint = (
+            lower_t.startswith(("http://", "https://"))
+            or any(f":{p}" in lower_t for p in ("80", "443", "5000", "8000", "8080", "8443", "3000"))
+        )
+        if is_web_hint:
+            probe_url = target if lower_t.startswith(("http://", "https://")) else f"http://{target}"
+            hdr = _run_optional_probe(runner, challenge, "curl", ["-sI", "--max-time", "8", probe_url], timeout_s=12)
+            if hdr:
+                hdr_lines = [ln.strip() for ln in hdr.splitlines() if ln.strip()][:8]
+                summaries.append(f"http-headers {probe_url}: {' | '.join(hdr_lines)[:300]}")
     else:
         summaries.append("no target set — nmap skipped")
 
