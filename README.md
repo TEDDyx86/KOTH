@@ -1,7 +1,7 @@
 # KOTH — King Of The Hill
 
 <p align="center">
-  <img src="app/static/brand/koth_crest_3.jpg" alt="KOTH Crest" width="140">
+  <img src="app/static/brand/koth_brand_lockup.jpg" alt="KOTH — King Of The Hill" width="520">
 </p>
 
 ![KOTH — Cyber Alpinist](app/static/brand/koth_hero_2.jpg)
