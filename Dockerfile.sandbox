@@ -2,23 +2,44 @@ FROM kalilinux/kali-rolling
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN echo "wireshark-common wireshark-common/install-setuid boolean false" | debconf-set-selections \
+  && apt-get update && apt-get install -y --no-install-recommends \
     nmap \
     ncat \
     curl \
+    ffuf \
+    gobuster \
+    whatweb \
+    jq \
     binutils \
     gdb \
+    radare2 \
+    ltrace \
+    strace \
+    patchelf \
+    nasm \
     sqlmap \
     python3 \
     python3-pip \
     file \
     binwalk \
     libimage-exiftool-perl \
+    tshark \
+    foremost \
+    steghide \
+    john \
+    openssl \
     ca-certificates \
   && pip3 install --no-cache-dir --break-system-packages \
     pwntools \
     pycryptodome \
     requests \
+    ROPGadget \
+    z3-solver \
+    sympy \
+    beautifulsoup4 \
+    pillow \
+    scapy \
   && ln -sf /usr/bin/python3 /usr/bin/python \
   && rm -rf /var/lib/apt/lists/*
 

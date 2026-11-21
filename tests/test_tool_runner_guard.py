@@ -17,7 +17,7 @@ class ToolRunnerFixture:
 def test_unknown_tool_raises(tmp_path):
     f = ToolRunnerFixture(tmp_path)
     with pytest.raises(ToolNotAllowed):
-        f.runner.build_argv("binwalk", [])
+        f.runner.build_argv("definitely_unknown_tool_xyz", [])
 
 
 def test_shell_metachar_rejected(tmp_path):
@@ -43,7 +43,18 @@ def test_no_target_args_without_hosts_pass(tmp_path):
     assert f.validate(None, ["-c", "print(1+1)"]) == ["-c", "print(1+1)"]
 
 
+def test_local_filenames_allowed_while_urls_checked(tmp_path):
+    f = ToolRunnerFixture(tmp_path)
+    assert f.validate(None, ["challenge.bin", "photo.jpg", "capture.pcap"]) == [
+        "challenge.bin",
+        "photo.jpg",
+        "capture.pcap",
+    ]
+    with pytest.raises(TargetNotAllowed):
+        f.validate("chal.local:1337", ["https://evil.py/payload"])
+
+
 def test_build_argv_ok(tmp_path):
     f = ToolRunnerFixture(tmp_path)
     argv = f.runner.build_argv("python", ["-c", "print(1)"])
-    assert "python" in argv[0].lower()
+    assert any("python" in a.lower() for a in argv)

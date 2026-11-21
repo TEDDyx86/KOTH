@@ -47,6 +47,7 @@ def _make_orchestrator(storage_dir) -> Orchestrator:
             cands[0],
             persona_text=_persona_text(role_key),
             fallback_models=cands[1:],
+            category=cat,
         )
     return Orchestrator(runner=runner, jury=jury, specialists=specialists,
                         agents_limits=agents_cfg.limits)

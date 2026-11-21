@@ -13,6 +13,7 @@
     {% elif saved == "imported" %}Chaves importadas de ~/.local/share/opencode/auth.json.
     {% elif saved == "models" %}Modelos do Orquestrador atualizados em config/models.yaml e aplicados imediatamente.
     {% elif saved == "sandbox" %}Modo do Sandbox atualizado em config/tools.yaml e aplicado ao runtime.
+    {% elif saved == "mcp" %}Servidores MCP atualizados em config/mcp.yaml e aplicados aos especialistas.
     {% endif %}
   </p>
 </div>
@@ -352,6 +353,93 @@
       </tr>
       {% endfor %}
     </table>
+  </section>
+
+  <section class="card">
+    <div class="row-actions" style="justify-content:space-between; align-items:center; margin-bottom:0.65rem;">
+      <div>
+        <h2 style="margin-bottom:0.2rem;">Servidores MCP &amp; Ferramentas IA</h2>
+        <p style="color:var(--muted); font-size:0.84rem; margin:0;">
+          Servidores ativos em <span class="mono">config/mcp.yaml</span> são anexados automaticamente aos especialistas.
+          Use <span class="mono">python -m app.cli mcp</span> para expor o sandbox e Arsenal KOTH para clientes externos.
+        </p>
+      </div>
+      <span id="mcp-test-status"></span>
+    </div>
+
+    <table class="list" style="margin-bottom:0.85rem;">
+      <tr><th>Servidor</th><th>Categoria</th><th>Transporte / Comando</th><th>Status</th><th>Ações</th></tr>
+      {% for m in mcp_rows %}
+      <tr>
+        <td>
+          <strong>{{ m.label }}</strong>
+          <div style="color:var(--muted); font-size:0.78rem;">{{ m.description }}</div>
+        </td>
+        <td class="mono">{{ m.category }}</td>
+        <td class="mono" style="font-size:0.8rem;">[{{ m.transport }}] {{ m.target }}</td>
+        <td>
+          {% if m.enabled %}
+            <span class="badge flag-ok">ativo</span>
+          {% else %}
+            <span class="badge">desativado</span>
+          {% endif %}
+          {% if not m.ready %}
+            <span class="badge">binário ausente</span>
+          {% endif %}
+        </td>
+        <td>
+          <div class="row-actions">
+            <form method="post" action="/settings/mcp/toggle">
+              <input type="hidden" name="name" value="{{ m.name }}">
+              <button class="btn ghost" type="submit">{{ "Desativar" if m.enabled else "Ativar" }}</button>
+            </form>
+            <button class="btn ghost" type="button"
+                    hx-post="/settings/mcp/test"
+                    hx-vals='{"name": "{{ m.name }}"}'
+                    hx-target="#mcp-test-status"
+                    hx-swap="innerHTML"
+                    hx-disabled-elt="this">Testar</button>
+            <form method="post" action="/settings/mcp/delete">
+              <input type="hidden" name="name" value="{{ m.name }}">
+              <button class="btn danger" type="submit">Remover</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+
+    <details style="margin-bottom:0.85rem;">
+      <summary class="mono" style="cursor:pointer; color:var(--accent); font-size:0.85rem;">+ Adicionar servidor MCP customizado</summary>
+      <form method="post" action="/settings/mcp/add" class="form-grid" style="margin-top:0.65rem;">
+        <input name="name" placeholder="ID curto (ex: burp)" required>
+        <input name="label" placeholder="Nome legível (opcional)">
+        <select name="category">
+          <option value="all">all (todos especialistas)</option>
+          <option value="web">web</option>
+          <option value="pwn">pwn</option>
+          <option value="reversing">reversing</option>
+          <option value="forensics">forensics</option>
+          <option value="crypto">crypto</option>
+          <option value="osint">osint</option>
+        </select>
+        <select name="transport">
+          <option value="stdio">stdio (comando local)</option>
+          <option value="http">http (Streamable HTTP)</option>
+          <option value="sse">sse (Server-Sent Events)</option>
+        </select>
+        <input name="command" placeholder="Comando stdio (ex: uvx, npx)">
+        <input name="args" placeholder="Args stdio (ex: -y @playwright/mcp)">
+        <input name="url" placeholder="URL HTTP/SSE (ex: http://127.0.0.1:8080/sse)">
+        <input name="description" placeholder="Descrição curta">
+        <button class="btn" type="submit">Salvar servidor MCP</button>
+      </form>
+    </details>
+
+    <details>
+      <summary class="mono" style="cursor:pointer; color:var(--muted); font-size:0.83rem;">Snippet MCP para Claude Code / Codex / Gemini / Cursor</summary>
+      <pre class="mono" style="margin-top:0.5rem; font-size:0.78rem; padding:0.7rem; background:#0d0708; border:1px solid var(--border); overflow-x:auto;">{{ mcp_snippet }}</pre>
+    </details>
   </section>
 
   <section class="card">

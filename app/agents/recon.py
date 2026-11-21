@@ -77,9 +77,10 @@ def recon_bundle(runner, session: Session, challenge: Challenge,
         ftype = detect_file_type(path)
         summaries.append(f"file {att.name}: {ftype} ({att.size} bytes)")
         entry: dict = {"name": att.name, "file_type": ftype, "strings": []}
+        staged_name = Path(att.name).name
         try:
             res = runner.run_raw(challenge, "strings",
-                                 [str(path)], timeout_s=30, output_limit_mb=1)
+                                 [staged_name], timeout_s=30, output_limit_mb=1)
         except Exception as exc:  # tool missing / guard — recon must not die
             summaries.append(f"strings {att.name}: skipped ({exc})")
             digests.append(entry)

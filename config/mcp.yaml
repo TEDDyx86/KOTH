@@ -1,0 +1,58 @@
+servers:
+  radare2:
+    label: "Radare2 MCP (Reversing / Binary)"
+    category: reversing
+    transport: stdio
+    command: r2mcp
+    args: []
+    env: {}
+    enabled: false
+    description: "Desmontagem, xrefs, funções e decompilação via radare2 para Reverse e Pwn."
+
+  ghidra:
+    label: "GhidraMCP (Decompiler / Reversing)"
+    category: reversing
+    transport: sse
+    url: "http://127.0.0.1:8080/sse"
+    headers: {}
+    enabled: false
+    description: "Ponte MCP para o Ghidra ativo (funções, pseudo-C, símbolos e strings)."
+
+  gdb:
+    label: "GDB / Pwndbg MCP (Pwn / Debug)"
+    category: pwn
+    transport: stdio
+    command: uvx
+    args: ["gdb-mcp"]
+    env: {}
+    enabled: false
+    description: "Inspeção dinâmica de registradores, stack, heap, breakpoints e memória."
+
+  playwright:
+    label: "Playwright MCP (Browser / XSS / SPA)"
+    category: web
+    transport: stdio
+    command: npx
+    args: ["-y", "@playwright/mcp@latest", "--headless"]
+    env: {}
+    enabled: false
+    description: "Navegador headless para XSS, CSRF, DOM/localStorage e SPAs JavaScript."
+
+  fetch:
+    label: "Fetch MCP (Web / OSINT)"
+    category: web
+    transport: stdio
+    command: uvx
+    args: ["mcp-server-fetch"]
+    env: {}
+    enabled: false
+    description: "Download limpo de páginas web e conversão para Markdown para Web e OSINT."
+
+  hexstrike:
+    label: "HexStrike / Kali AI MCP"
+    category: all
+    transport: http
+    url: "http://127.0.0.1:8888/mcp"
+    headers: {}
+    enabled: false
+    description: "Servidor MCP HTTP externo de automação ofensiva Kali/CTF."

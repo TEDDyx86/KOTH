@@ -9,6 +9,8 @@ from .agents.cli_providers import cli_provider_status_rows
 from .config import settings
 from .tooling.config import load_tools_config
 from .tooling.doctor import inventory
+from .tooling.koth_mcp import run_koth_mcp_server
+from .tooling.mcp_servers import mcp_status_rows
 from .tooling.sandbox import current_sandbox_mode, docker_status
 
 
@@ -38,6 +40,11 @@ def cmd_doctor() -> int:
     for c in cli_provider_status_rows():
         mark = "OK" if c["installed"] else "MISSING"
         print(f"  - {c['label']}: {mark} (login: {c['login_hint']})")
+    print("\nServidores MCP:")
+    for m in mcp_status_rows():
+        state = "ON" if m["enabled"] else "off"
+        ready = "OK" if m["ready"] else "MISSING"
+        print(f"  - {m['name']:<12} [{state} | {m['transport']}] {ready} ({m['target']})")
     return 0
 
 
@@ -54,11 +61,15 @@ def main(argv: list[str] | None = None) -> int:
     serve_p.add_argument("--no-browser", action="store_true")
     serve_p.add_argument("--reload", action="store_true")
 
-    sub.add_parser("doctor", help="Verifica ferramentas, Docker e provedores de IA")
+    sub.add_parser("doctor", help="Verifica ferramentas, Docker, MCP e provedores de IA")
+    sub.add_parser("mcp", help="Inicia o servidor MCP stdio do KOTH para clientes externos")
 
     args = parser.parse_args(argv)
     if args.command == "doctor":
         return cmd_doctor()
+    if args.command == "mcp":
+        run_koth_mcp_server()
+        return 0
 
     host = getattr(args, "host", "127.0.0.1")
     port = getattr(args, "port", 8777)

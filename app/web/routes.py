@@ -35,6 +35,15 @@ from ..services.storage import StorageService
 from ..templates import templates
 from ..tooling.config import DEFAULT_PATH as TOOLS_PATH, load_tools_config
 from ..tooling.doctor import inventory
+from ..tooling.mcp_servers import (
+    DEFAULT_MCP_PATH as MCP_PATH,
+    add_mcp_server,
+    delete_mcp_server,
+    koth_mcp_client_snippet,
+    mcp_status_rows,
+    probe_mcp_server,
+    toggle_mcp_server,
+)
 from ..tooling.sandbox import (
     build_sandbox_image,
     current_sandbox_mode,
@@ -222,6 +231,8 @@ def settings_page(request: Request, saved: str | None = None,
     agents_cfg = load_agents(AGENTS_PATH)
     tools_cfg = load_tools_config(TOOLS_PATH)
     tools_rows = inventory(tools_cfg)
+    mcp_rows = mcp_status_rows(MCP_PATH)
+    mcp_snippet = koth_mcp_client_snippet()
     sandbox_mode = current_sandbox_mode(TOOLS_PATH)
     storage_dir = request.app.state.storage.storage_dir
     providers_status = provider_status_rows(storage_dir, models_path=MODELS_PATH)
@@ -250,6 +261,8 @@ def settings_page(request: Request, saved: str | None = None,
         "agents_cfg": agents_cfg,
         "tools_rows": tools_rows,
         "tools_cfg": tools_cfg,
+        "mcp_rows": mcp_rows,
+        "mcp_snippet": mcp_snippet,
         "sandbox_mode": sandbox_mode,
         "providers_status": providers_status,
         "added_providers": [p for p in providers_status if p["added"]],
@@ -474,6 +487,60 @@ def settings_sandbox_build(request: Request):
     tools_cfg = load_tools_config(TOOLS_PATH)
     tag = tools_cfg.defaults.docker_image or "koth-sandbox:latest"
     ok, msg = build_sandbox_image(tag=tag)
+    return templates.TemplateResponse(request, "_provider_test.html", {"ok": ok, "msg": msg})
+
+
+@router.post("/settings/mcp/toggle")
+def settings_mcp_toggle(request: Request, name: str = Form(...)):
+    try:
+        toggle_mcp_server(name, path=MCP_PATH)
+        request.app.state._orchestrator = None
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"MCP '{name}' não encontrado")
+    return RedirectResponse("/settings?tab=runtime&saved=mcp", status_code=303)
+
+
+@router.post("/settings/mcp/add")
+def settings_mcp_add(request: Request,
+                     name: str = Form(...),
+                     label: str = Form(""),
+                     category: str = Form("all"),
+                     transport: str = Form("stdio"),
+                     command: str = Form(""),
+                     args: str = Form(""),
+                     url: str = Form(""),
+                     description: str = Form("")):
+    import shlex
+    parsed_args = shlex.split(args) if args.strip() else []
+    try:
+        add_mcp_server(
+            name,
+            label=label,
+            category=category,
+            transport=transport,
+            command=command,
+            args=parsed_args,
+            url=url,
+            description=description,
+            enabled=True,
+            path=MCP_PATH,
+        )
+        request.app.state._orchestrator = None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return RedirectResponse("/settings?tab=runtime&saved=mcp", status_code=303)
+
+
+@router.post("/settings/mcp/delete")
+def settings_mcp_delete(request: Request, name: str = Form(...)):
+    delete_mcp_server(name, path=MCP_PATH)
+    request.app.state._orchestrator = None
+    return RedirectResponse("/settings?tab=runtime&saved=mcp", status_code=303)
+
+
+@router.post("/settings/mcp/test")
+def settings_mcp_test(request: Request, name: str = Form(...)):
+    ok, msg = probe_mcp_server(name, path=MCP_PATH)
     return templates.TemplateResponse(request, "_provider_test.html", {"ok": ok, "msg": msg})
 
 

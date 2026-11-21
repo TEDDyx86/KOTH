@@ -1,12 +1,83 @@
 defaults:
   timeout_s: 300
   output_limit_mb: 10
+  docker_image: koth-sandbox:latest
 tools:
-  nmap:    {mode: native, guard: strict}
-  ncat:    {mode: native, guard: strict}
-  curl:    {mode: native, guard: strict}
-  strings: {mode: native, guard: strict}
-  gdb:     {mode: native, guard: strict}
-  objdump: {mode: native, guard: strict}
-  sqlmap:  {mode: native, guard: strict}
-  python:  {mode: native, guard: none}
+  nmap:
+    mode: docker
+    guard: strict
+  ncat:
+    mode: docker
+    guard: strict
+  curl:
+    mode: docker
+    guard: strict
+  ffuf:
+    mode: docker
+    guard: strict
+  gobuster:
+    mode: docker
+    guard: strict
+  whatweb:
+    mode: docker
+    guard: strict
+  sqlmap:
+    mode: docker
+    guard: strict
+  jq:
+    mode: docker
+    guard: strict
+  file:
+    mode: docker
+    guard: strict
+  strings:
+    mode: docker
+    guard: strict
+  readelf:
+    mode: docker
+    guard: strict
+  objdump:
+    mode: docker
+    guard: strict
+  gdb:
+    mode: docker
+    guard: strict
+  radare2:
+    mode: docker
+    guard: strict
+  ltrace:
+    mode: docker
+    guard: strict
+  strace:
+    mode: docker
+    guard: strict
+  checksec:
+    mode: docker
+    guard: strict
+  ROPgadget:
+    mode: docker
+    guard: strict
+  binwalk:
+    mode: docker
+    guard: strict
+  exiftool:
+    mode: docker
+    guard: strict
+  tshark:
+    mode: docker
+    guard: strict
+  foremost:
+    mode: docker
+    guard: strict
+  steghide:
+    mode: docker
+    guard: strict
+  openssl:
+    mode: docker
+    guard: strict
+  john:
+    mode: docker
+    guard: strict
+  python:
+    mode: docker
+    guard: none

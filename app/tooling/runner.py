@@ -27,7 +27,18 @@ class TargetNotAllowed(Exception):
 
 _IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _DOMAIN = re.compile(r"\b[a-z0-9][a-z0-9.\-]+\.[a-z]{2,}\b", re.IGNORECASE)
-_ALWAYS_OK = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+_ALWAYS_OK = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal"}
+_URL_SCHEME = re.compile(r"^[a-z][a-z0-9+\-.]*://", re.IGNORECASE)
+_FILE_SUFFIXES = {
+    ".txt", ".bin", ".elf", ".exe", ".dll", ".so", ".o", ".a", ".out", ".raw",
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico",
+    ".pdf", ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar",
+    ".pcap", ".pcapng", ".cap", ".sql", ".sqlite", ".db", ".csv", ".log",
+    ".py", ".c", ".cpp", ".h", ".js", ".ts", ".json", ".yaml", ".yml", ".xml",
+    ".key", ".pem", ".pub", ".crt", ".csr", ".der", ".enc", ".img", ".iso",
+    ".dmp", ".core", ".wasm", ".apk", ".jar", ".class", ".pyc", ".asm", ".md",
+    ".wav", ".mp3", ".mp4", ".sh",
+}
 
 
 @dataclass
@@ -104,7 +115,11 @@ class ToolRunner:
         if spec.mode == "docker":
             image = spec.image or self.settings.defaults.docker_image
             mount = str(workdir.resolve()) if workdir else str(Path.cwd().resolve())
-            net_args = ["--network", "none"] if not challenge_target else []
+            net_args = (
+                ["--network", "none"]
+                if not challenge_target
+                else ["--add-host=host.docker.internal:host-gateway"]
+            )
             return [executable, "run", "--rm", *net_args, "-v", f"{mount}:/work",
                     "-w", "/work", image, tool, *tail]
         if spec.mode == "wsl":
@@ -125,9 +140,17 @@ class ToolRunner:
         if challenge_target:
             allowed.add(challenge_target.split(":")[0].lower())
         for arg in args:
-            for token in _IPV4.findall(arg) + _DOMAIN.findall(arg):
+            is_url = bool(_URL_SCHEME.match(arg))
+            for token in _IPV4.findall(arg):
                 if token.lower() not in allowed:
                     raise TargetNotAllowed(f"host '{token}' is not the challenge target")
+            for token in _DOMAIN.findall(arg):
+                low = token.lower()
+                if low in allowed:
+                    continue
+                if not is_url and Path(low).suffix in _FILE_SUFFIXES:
+                    continue
+                raise TargetNotAllowed(f"host '{token}' is not the challenge target")
         return args
 
     def run_raw(self, challenge, tool: str, args: list[str],

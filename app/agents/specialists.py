@@ -4,7 +4,10 @@ from pathlib import Path
 from pydantic_ai import Agent, BinaryContent, ModelRetry, RunContext
 from sqlmodel import select
 
+from ..knowledge.index import DEFAULT_KNOWLEDGE_ROOT, KnowledgeIndex
 from ..models import Attachment, AttachmentType
+from ..tooling.koth_mcp import safe_sandbox_file
+from ..tooling.mcp_servers import build_pydantic_toolsets
 from ..tooling.runner import ToolRunner
 from .context import specialist_context
 from .models import run_with_fallback
@@ -69,14 +72,26 @@ def _forensics_images(session, challenge, runner: ToolRunner | None) -> list[Bin
     return images
 
 
-def _build_specialist_agent(model, persona_text: str, max_tool_retries: int) -> Agent:
-    agent = Agent(model, deps_type=RunDeps, output_type=SpecialistReport,
-                  system_prompt=persona_text)
+def _build_specialist_agent(
+    model,
+    persona_text: str,
+    max_tool_retries: int,
+    *,
+    toolsets: list | None = None,
+) -> Agent:
+    kwargs: dict = {
+        "deps_type": RunDeps,
+        "output_type": SpecialistReport,
+        "system_prompt": persona_text,
+    }
+    if toolsets:
+        kwargs["toolsets"] = toolsets
+    agent = Agent(model, **kwargs)
 
     @agent.tool(retries=max_tool_retries)
     def run_tool(ctx: RunContext[RunDeps], tool: str, args: list[str]) -> str:
         """Execute an allowlisted tool against the challenge via the sandbox.
-        Returns the captured output (truncated)."""
+        Returns captured stdout/stderr (truncated)."""
         limit = max(int(ctx.deps.order.max_tool_runs or 1), 1)
         if ctx.deps.tool_calls >= limit:
             raise ModelRetry(
@@ -86,23 +101,104 @@ def _build_specialist_agent(model, persona_text: str, max_tool_retries: int) -> 
         ctx.deps.tool_calls += 1
         allowed_list = ", ".join(sorted(ctx.deps.runner.settings.tools))
         try:
-            res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge,
-                                      tool, args)
+            res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge, tool, args)
         except Exception as exc:  # allowlist/guard/target violations
-            raise ModelRetry(f"tool run rejected: {type(exc).__name__}: {exc}. "
-                             f"Allowed tools: {allowed_list}. Retry with a fixed call.")
-        return (f"rc={res.returncode} truncated={res.truncated}\n"
-                f"--- stdout ---\n{res.stdout[:4000]}\n"
-                f"--- stderr ---\n{res.stderr[:1000]}")
+            raise ModelRetry(
+                f"tool run rejected: {type(exc).__name__}: {exc}. "
+                f"Allowed tools: {allowed_list}. Retry with a fixed call."
+            )
+        return (
+            f"rc={res.returncode} truncated={res.truncated}\n"
+            f"--- stdout ---\n{res.stdout[:4000]}\n"
+            f"--- stderr ---\n{res.stderr[:1000]}"
+        )
+
+    @agent.tool(retries=max_tool_retries)
+    def run_python_script(ctx: RunContext[RunDeps], filename: str, code: str) -> str:
+        """Write a Python script inside the challenge sandbox workdir (/work) and execute it.
+        Ideal for pwntools exploits, Z3/SymPy crypto solvers, Scapy PCAP parsing, and HTTP scripts."""
+        limit = max(int(ctx.deps.order.max_tool_runs or 1), 1)
+        if ctx.deps.tool_calls >= limit:
+            raise ModelRetry(
+                f"tool call budget ({limit}) reached — do not call more tools, "
+                "return your SpecialistReport now."
+            )
+        ctx.deps.tool_calls += 1
+        try:
+            workdir = ctx.deps.runner.sandbox_workdir(ctx.deps.challenge)
+            target = safe_sandbox_file(workdir, filename or "solve.py")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(code, encoding="utf-8")
+            rel = str(target.relative_to(workdir)).replace("\\", "/")
+            res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge, "python", [rel])
+        except Exception as exc:
+            raise ModelRetry(f"run_python_script failed: {type(exc).__name__}: {exc}")
+        return (
+            f"script={rel} rc={res.returncode} truncated={res.truncated}\n"
+            f"--- stdout ---\n{res.stdout[:4000]}\n"
+            f"--- stderr ---\n{res.stderr[:1000]}"
+        )
+
+    @agent.tool
+    def list_sandbox_files(ctx: RunContext[RunDeps]) -> str:
+        """List files currently in the challenge sandbox workdir (/work)."""
+        ctx.deps.runner.stage_downloads(ctx.deps.session, ctx.deps.challenge)
+        workdir = ctx.deps.runner.sandbox_workdir(ctx.deps.challenge)
+        items: list[str] = []
+        for p in sorted(workdir.rglob("*")):
+            if p.is_file():
+                rel = str(p.relative_to(workdir)).replace("\\", "/")
+                items.append(f"{rel} ({p.stat().st_size} bytes)")
+        return "\n".join(items[:80]) if items else "(empty workdir)"
+
+    @agent.tool
+    def read_sandbox_file(
+        ctx: RunContext[RunDeps], filename: str, offset: int = 0, max_bytes: int = 4000
+    ) -> str:
+        """Read a slice of text (or hex summary for binary) from a file inside the sandbox workdir."""
+        ctx.deps.runner.stage_downloads(ctx.deps.session, ctx.deps.challenge)
+        workdir = ctx.deps.runner.sandbox_workdir(ctx.deps.challenge)
+        target = safe_sandbox_file(workdir, filename)
+        if not target.exists():
+            return f"file not found: {filename}"
+        start = max(0, int(offset))
+        cap = max(1, min(int(max_bytes), 16000))
+        raw = target.read_bytes()
+        chunk = raw[start:start + cap]
+        try:
+            text = chunk.decode("utf-8")
+            return f"[text {start}..{start + len(chunk)} / {len(raw)}b]\n{text}"
+        except UnicodeDecodeError:
+            hex_preview = chunk[:512].hex(" ")
+            return f"[binary {start}..{start + len(chunk)} / {len(raw)}b hex]\n{hex_preview}"
+
+    @agent.tool
+    def search_arsenal(ctx: RunContext[RunDeps], query: str, category: str = "") -> str:
+        """Search the local FTS5 CTF knowledge base (ctf-skills + dispatch) for exploit techniques."""
+        if ctx.deps.session is None:
+            return "(knowledge unavailable without DB session)"
+        idx = KnowledgeIndex(ctx.deps.session, knowledge_root=DEFAULT_KNOWLEDGE_ROOT)
+        cat = (category or ctx.deps.order.category or "").strip().lower() or None
+        hits = idx.search(query.strip(), limit=4, category=cat) or idx.search(query.strip(), limit=4)
+        if not hits:
+            return f"no arsenal hits for {query!r}"
+        return "\n".join(f"- {h['title']} ({h['path']}): {h['snippet']}" for h in hits)
 
     return agent
 
 
 class SpecialistRunner:
-    def __init__(self, model, persona_text: str, max_tool_retries: int = 4,
-                 fallback_models: list | None = None) -> None:
+    def __init__(
+        self,
+        model,
+        persona_text: str,
+        max_tool_retries: int = 4,
+        fallback_models: list | None = None,
+        category: str | None = None,
+    ) -> None:
         self.persona_text = persona_text
         self.max_tool_retries = max_tool_retries
+        self.category = category
         self.models = [model, *(fallback_models or [])]
         self.agent = _build_specialist_agent(model, persona_text, max_tool_retries)
         self.last_usage: dict | None = None
@@ -110,14 +206,32 @@ class SpecialistRunner:
     def run(self, session, challenge, order: TaskOrder, runner: ToolRunner) -> SpecialistReport:
         deps = RunDeps(runner=runner, session=session, challenge=challenge, order=order)
         text_prompt = specialist_context(session, challenge, order)
+        allowed_tools = ", ".join(sorted(runner.settings.tools))
+        text_prompt += f"\n\n## Available sandbox tools\n{allowed_tools}"
         images = _forensics_images(session, challenge, runner) if order.category.lower() == "forensics" else []
         prompt_input: str | list = [text_prompt, *images] if images else text_prompt
 
+        cat = self.category or order.category
+        mcp_toolsets = build_pydantic_toolsets(category=cat)
+
         def _call(m):
             deps.tool_calls = 0
-            ag = self.agent if m is self.models[0] else _build_specialist_agent(
-                m, self.persona_text, self.max_tool_retries)
-            return ag.run_sync(prompt_input, deps=deps)
+            if m is self.models[0] and not mcp_toolsets:
+                return self.agent.run_sync(prompt_input, deps=deps)
+            ag = _build_specialist_agent(
+                m,
+                self.persona_text,
+                self.max_tool_retries,
+                toolsets=mcp_toolsets or None,
+            )
+            try:
+                return ag.run_sync(prompt_input, deps=deps)
+            except Exception:
+                if mcp_toolsets:
+                    # Fallback cleanly if an external MCP server is unreachable mid-run
+                    fallback_ag = _build_specialist_agent(m, self.persona_text, self.max_tool_retries)
+                    return fallback_ag.run_sync(prompt_input, deps=deps)
+                raise
 
         result = run_with_fallback(self.models, _call)
         self.last_usage = _extract_usage(result)
