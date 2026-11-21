@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from sqlmodel import Session, select
 
 from ..agents.cli_op import list_cli_messages, process_cli_turn
@@ -14,6 +14,13 @@ from ..agents.cli_providers import (
 )
 from ..agents.config import AGENTS_PATH, MODELS_PATH, load_agents, load_models
 from ..agents.planner import planner_rank
+from ..agents.writeup import (
+    build_challenge_writeup,
+    build_event_writeup,
+    build_proof_bundle_zip,
+    persist_writeup_note_and_attachment,
+    save_writeup_to_arsenal,
+)
 from ..agents.providers import (
     CATALOG_BY_NAME,
     delete_provider_key,
@@ -845,3 +852,94 @@ def upload_attachment_form(request: Request, challenge_id: int,
     uploads = [f for f in [file, *files] if f is not None and f.filename]
     _save_uploads(session, request.app.state.storage, challenge_id, uploads, AttachmentType(type))
     return RedirectResponse(f"/challenges/{challenge_id}", status_code=303)
+
+
+def _latest_session_for(request: Request, session: Session, challenge_id: int):
+    orch = _safe_orchestrator(request)
+    if orch is not None and hasattr(orch, "latest_for_challenge"):
+        return orch.latest_for_challenge(session, challenge_id)
+    return None
+
+
+@router.get("/challenges/{challenge_id}/writeup.md")
+def download_challenge_writeup(request: Request, challenge_id: int,
+                               session: Session = Depends(get_session)):
+    ch = tracking.get_challenge(session, challenge_id)
+    if ch is None:
+        raise HTTPException(status_code=404, detail="challenge not found")
+    storage = getattr(request.app.state, "storage", None)
+    sess = _latest_session_for(request, session, challenge_id)
+    md = build_challenge_writeup(session, ch, agent_session=sess, storage=storage)
+    slug = "".join(c if c.isalnum() or c in "-_" else "-" for c in ch.title.lower()).strip("-") or f"challenge-{challenge_id}"
+    return Response(
+        content=md,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{slug}-writeup.md"'},
+    )
+
+
+@router.get("/challenges/{challenge_id}/proof-bundle.zip")
+def download_proof_bundle(request: Request, challenge_id: int,
+                          session: Session = Depends(get_session)):
+    ch = tracking.get_challenge(session, challenge_id)
+    if ch is None:
+        raise HTTPException(status_code=404, detail="challenge not found")
+    storage = getattr(request.app.state, "storage", None)
+    sess = _latest_session_for(request, session, challenge_id)
+    zip_bytes = build_proof_bundle_zip(session, ch, agent_session=sess, storage=storage)
+    slug = "".join(c if c.isalnum() or c in "-_" else "-" for c in ch.title.lower()).strip("-") or f"challenge-{challenge_id}"
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{slug}-proofs.zip"'},
+    )
+
+
+@router.post("/challenges/{challenge_id}/writeup/generate")
+def generate_challenge_writeup(request: Request, challenge_id: int,
+                               next: str = Form(""),
+                               session: Session = Depends(get_session)):
+    ch = tracking.get_challenge(session, challenge_id)
+    if ch is None:
+        raise HTTPException(status_code=404, detail="challenge not found")
+    storage = getattr(request.app.state, "storage", None)
+    sess = _latest_session_for(request, session, challenge_id)
+    md = build_challenge_writeup(session, ch, agent_session=sess, storage=storage)
+    persist_writeup_note_and_attachment(session, ch, md, storage=storage)
+    return RedirectResponse(_safe_next(next, f"/challenges/{challenge_id}"), status_code=303)
+
+
+@router.post("/challenges/{challenge_id}/arsenal/save")
+def save_challenge_to_arsenal(request: Request, challenge_id: int,
+                              session: Session = Depends(get_session)):
+    from ..knowledge.index import DEFAULT_KNOWLEDGE_ROOT
+
+    ch = tracking.get_challenge(session, challenge_id)
+    if ch is None:
+        raise HTTPException(status_code=404, detail="challenge not found")
+    storage = getattr(request.app.state, "storage", None)
+    sess = _latest_session_for(request, session, challenge_id)
+    md = build_challenge_writeup(session, ch, agent_session=sess, storage=storage)
+    dest, count = save_writeup_to_arsenal(session, ch, md, knowledge_root=DEFAULT_KNOWLEDGE_ROOT)
+    return templates.TemplateResponse(
+        request,
+        "_provider_test.html",
+        {"ok": True, "msg": f"Técnica salva em {dest.name} · FTS5 reindexado ({count} docs)"},
+    )
+
+
+@router.get("/events/{event_id}/writeup.md")
+def download_event_writeup(request: Request, event_id: int,
+                           only_solved: bool = False,
+                           session: Session = Depends(get_session)):
+    event = session.get(Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="event not found")
+    storage = getattr(request.app.state, "storage", None)
+    md = build_event_writeup(session, event, storage=storage, only_solved=only_solved)
+    slug = "".join(c if c.isalnum() or c in "-_" else "-" for c in event.name.lower()).strip("-") or f"event-{event_id}"
+    return Response(
+        content=md,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{slug}-writeups.md"'},
+    )

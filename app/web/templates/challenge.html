@@ -101,6 +101,27 @@
   </form>
 </section>
 
+<section class="card" id="writeup-card">
+  <div class="dash-card-head">
+    <h2>Writeup &amp; Provas</h2>
+    <div class="row-actions">
+      <form method="post" action="/challenges/{{ challenge.id }}/writeup/generate">
+        <button class="btn ghost btn-sm" type="submit">Gerar / Atualizar Writeup</button>
+      </form>
+      <a class="btn ghost btn-sm" href="/challenges/{{ challenge.id }}/writeup.md">Baixar writeup.md</a>
+      <a class="btn ghost btn-sm" href="/challenges/{{ challenge.id }}/proof-bundle.zip">Baixar provas (.zip)</a>
+      <button class="btn ghost btn-sm" type="button"
+              hx-post="/challenges/{{ challenge.id }}/arsenal/save"
+              hx-target="#chal-arsenal-status"
+              hx-swap="innerHTML">Salvar técnica no Arsenal</button>
+    </div>
+  </div>
+  <div id="chal-arsenal-status" style="margin-bottom:0.5rem;"></div>
+  <p style="color:var(--muted); font-size:0.84rem; margin:0;">
+    Consolida automaticamente enunciado, comandos executados, saídas de ferramentas, scripts do <span class="mono">/work</span> e validação da flag em Markdown e ZIP reproduzível.
+  </p>
+</section>
+
 <section class="card">
   <h2>Notas <small style="color: var(--muted);">{{ notes | length }} versões</small></h2>
   {% if notes %}

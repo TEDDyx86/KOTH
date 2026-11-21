@@ -15,6 +15,7 @@
     </div>
   </div>
   <div class="row-actions">
+    <a class="btn ghost" href="/events/{{ event.id }}/writeup.md">Exportar Writeups (.md)</a>
     <button type="button" class="btn ghost" onclick="var d=document.getElementById('edit-event'); d.open=!d.open;">Editar evento</button>
     <form method="post" action="/events/{{ event.id }}/delete"
           onsubmit="return confirm('Apagar o evento {{ event.name|e }} e TODOS os seus challenges/anexos?');">

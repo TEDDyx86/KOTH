@@ -52,6 +52,10 @@ def parse_knowledge_dir(root: Path) -> list[Entry]:
             idx = parts.index("Arsenal")
             category = parts[idx + 1] if len(parts) > idx + 1 else ""
             source = "dispatch-arsenal"
+        elif "local" in parts:
+            idx = parts.index("local")
+            category = parts[idx + 1] if len(parts) > idx + 1 else "misc"
+            source = "koth-local"
         else:
             continue
         text = md_path.read_text(encoding="utf-8", errors="replace")

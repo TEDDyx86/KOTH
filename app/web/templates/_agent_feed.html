@@ -19,6 +19,21 @@
     <p class="mono" style="color: var(--flag-ok);">flag: {{ sess.final_report.flag_candidate }}</p>
     {% endif %}
     <ul>{% for item in sess.final_report.attempts_summary %}<li class="mono">{{ item }}</li>{% endfor %}</ul>
+    <div class="row-actions" style="margin-top:0.6rem; align-items:center;">
+      <a class="btn ghost btn-sm" href="/challenges/{{ sess.challenge_id }}/writeup.md">Baixar writeup.md</a>
+      <a class="btn ghost btn-sm" href="/challenges/{{ sess.challenge_id }}/proof-bundle.zip">Baixar provas (.zip)</a>
+      <button type="button" class="btn ghost btn-sm"
+              hx-post="/challenges/{{ sess.challenge_id }}/arsenal/save"
+              hx-target="#agent-arsenal-status"
+              hx-swap="innerHTML">Salvar no Arsenal FTS5</button>
+      <span id="agent-arsenal-status"></span>
+    </div>
+    {% if sess.final_report.writeup_md %}
+    <details style="margin-top:0.6rem;">
+      <summary class="mono" style="cursor:pointer; color:var(--muted); font-size:0.82rem;">Prévia do Writeup &amp; Provas</summary>
+      <pre class="mono" style="white-space:pre-wrap; font-size:0.8rem; margin-top:0.5rem; padding:0.7rem; background:#080506; border:1px solid var(--panel-edge); border-radius:6px;">{{ sess.final_report.writeup_md }}</pre>
+    </details>
+    {% endif %}
   </div>
   {% endif %}
   {% if sess.pending_decision %}

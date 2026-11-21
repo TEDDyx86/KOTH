@@ -41,3 +41,4 @@ class FinalReport(BaseModel):
     status: Literal["solved", "failed", "gave_up", "awaiting_input"]
     attempts_summary: list[str] = []
     flag_candidate: str | None = None
+    writeup_md: str | None = None

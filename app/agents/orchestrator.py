@@ -13,6 +13,7 @@ from .payloads import FinalReport, JuryDecision, SpecialistReport
 from .planner import check_stop_criteria, reassess_strategy
 from .recon import recon_bundle
 from .submission import validate_flag
+from .writeup import build_challenge_writeup, persist_writeup_note_and_attachment
 
 CATEGORY_ALIASES: dict[str, str] = {
     "reverse": "reversing",
@@ -218,14 +219,30 @@ class Orchestrator:
             return ()
 
     def _build_final_report(self, challenge_id: int, sess: AgentSession,
-                            status: str, flag_candidate: str | None = None) -> FinalReport:
+                            status: str, flag_candidate: str | None = None,
+                            *, session: Session | None = None,
+                            challenge: Challenge | None = None) -> FinalReport:
         summary = [f"dispatches={sess.dispatch_count}", f"tokens={sess.total_tokens}"]
         summary.extend(sess.findings[-10:])
+        writeup_md: str | None = None
+        ch = challenge or (session.get(Challenge, challenge_id) if session is not None else None)
+        storage = getattr(self.runner, "storage", None)
+        if session is not None and ch is not None and status in ("solved", "gave_up"):
+            try:
+                writeup_md = build_challenge_writeup(
+                    session, ch, agent_session=sess, storage=storage
+                )
+                persist_writeup_note_and_attachment(
+                    session, ch, writeup_md, storage=storage
+                )
+            except Exception:
+                writeup_md = None
         report = FinalReport(
             challenge_id=challenge_id,
             status=status,  # solved | failed | gave_up | awaiting_input
             attempts_summary=summary,
             flag_candidate=flag_candidate,
+            writeup_md=writeup_md,
         )
         sess.final_report = report
         return report
@@ -268,7 +285,8 @@ class Orchestrator:
             tracking.record_attempt(session, challenge.id, AttemptType.agent,
                                     stop.reason or "planner stop criteria reached",
                                     AttemptResult.failed)
-            self._build_final_report(challenge.id, sess, "gave_up")
+            self._build_final_report(challenge.id, sess, "gave_up",
+                                     session=session, challenge=challenge)
             self._save(session, sess)
             return
 
@@ -300,7 +318,8 @@ class Orchestrator:
             agent_session.pending_decision = None
             tracking.record_attempt(session, challenge.id, AttemptType.agent,
                                     f"jury gave up: {decision.reason}", AttemptResult.failed)
-            self._build_final_report(challenge.id, agent_session, "gave_up")
+            self._build_final_report(challenge.id, agent_session, "gave_up",
+                                     session=session, challenge=challenge)
             self._save(session, agent_session)
             return True
 
@@ -316,7 +335,8 @@ class Orchestrator:
                     agent_session.state = "solved"
                     agent_session.pending_decision = None
                     self._build_final_report(challenge.id, agent_session, "solved",
-                                             flag_candidate=cand)
+                                             flag_candidate=cand,
+                                             session=session, challenge=challenge)
                     self._save(session, agent_session)
                     return True
                 msg = f"specialist candidate {cand!r} rejected: {res.reason}"
@@ -335,7 +355,8 @@ class Orchestrator:
                 self._accumulate(agent_session, [reason])
                 tracking.record_attempt(session, challenge.id, AttemptType.agent,
                                         reason, AttemptResult.failed)
-                self._build_final_report(challenge.id, agent_session, "gave_up")
+                self._build_final_report(challenge.id, agent_session, "gave_up",
+                                         session=session, challenge=challenge)
                 self._save(session, agent_session)
                 return True
             if action == "RECON":
@@ -365,7 +386,8 @@ class Orchestrator:
                     agent_session.state = "solved"
                     agent_session.pending_decision = None
                     self._build_final_report(challenge.id, agent_session, "solved",
-                                             flag_candidate=candidate)
+                                             flag_candidate=candidate,
+                                             session=session, challenge=challenge)
                     self._save(session, agent_session)
                     return True
                 msg = f"submission rejected ({candidate}): {result.reason}"
