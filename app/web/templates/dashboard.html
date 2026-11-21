@@ -129,11 +129,19 @@
                 {% endif %}
               </td>
               <td class="dash-row-action">
-                {% if st and st.state == "awaiting_approval" %}
-                  <a class="btn" style="padding:0.25rem 0.65rem; font-size:0.8rem;" href="/challenges/{{ c.id }}/agent">Aprovar →</a>
-                {% else %}
-                  <a class="btn ghost" style="padding:0.25rem 0.65rem; font-size:0.8rem;" href="/challenges/{{ c.id }}/agent">Agente →</a>
-                {% endif %}
+                <div class="row-actions" style="justify-content:flex-end; flex-wrap:nowrap;">
+                  {% if st and st.state == "awaiting_approval" %}
+                    <a class="btn btn-sm" href="/challenges/{{ c.id }}/agent">Aprovar →</a>
+                  {% else %}
+                    <a class="btn ghost btn-sm" href="/challenges/{{ c.id }}/agent">Agente →</a>
+                  {% endif %}
+                  <a class="btn ghost btn-sm" href="/challenges/{{ c.id }}#edit-challenge">Editar</a>
+                  <form method="post" action="/challenges/{{ c.id }}/delete"
+                        onsubmit="return confirm('Apagar o challenge {{ c.title|e }}?');">
+                    <input type="hidden" name="next" value="/dashboard">
+                    <button class="btn danger btn-sm" type="submit">Apagar</button>
+                  </form>
+                </div>
               </td>
             </tr>
           {% else %}
@@ -172,7 +180,15 @@
           <div class="dash-event-item">
             <div class="dash-event-top">
               <a class="dash-event-name" href="/events/{{ ev.id }}">{{ ev.name }}</a>
-              <span class="badge {% if ev.status.value == 'active' %}flag-ok{% else %}solved{% endif %}">{{ ev.status.value }}</span>
+              <div class="row-actions" style="align-items:center; gap:0.35rem;">
+                <span class="badge {% if ev.status.value == 'active' %}flag-ok{% else %}solved{% endif %}">{{ ev.status.value }}</span>
+                <a class="btn ghost btn-sm" href="/events/{{ ev.id }}#edit-event">Editar</a>
+                <form method="post" action="/events/{{ ev.id }}/delete"
+                      onsubmit="return confirm('Apagar o evento {{ ev.name|e }} e todos os seus challenges?');">
+                  <input type="hidden" name="next" value="/dashboard">
+                  <button class="btn danger btn-sm" type="submit">Apagar</button>
+                </form>
+              </div>
             </div>
             <div class="meter" style="margin: 0.4rem 0 0.3rem;">
               <span style="width: {{ item.pct }}%;"></span>

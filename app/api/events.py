@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlmodel import Session
 
@@ -19,6 +19,13 @@ class EventCreate(BaseModel):
     ends_at: datetime | None = None
 
 
+class EventUpdate(BaseModel):
+    name: str | None = None
+    url: str | None = None
+    flag_format: str | None = None
+    status: EventStatus | None = None
+
+
 class StatusUpdate(BaseModel):
     status: EventStatus
 
@@ -35,9 +42,31 @@ def list_events(session: Session = Depends(get_session)):
     return tracking.list_events(session)
 
 
+@router.patch("/{event_id}", response_model=Event)
+def update_event(event_id: int, body: EventUpdate, session: Session = Depends(get_session)):
+    try:
+        return tracking.update_event(
+            session, event_id,
+            name=body.name, url=body.url,
+            flag_format=body.flag_format, status=body.status,
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="event not found")
+
+
 @router.patch("/{event_id}/status", response_model=Event)
 def set_status(event_id: int, body: StatusUpdate, session: Session = Depends(get_session)):
     try:
         return tracking.set_event_status(session, event_id, body.status)
     except LookupError:
         raise HTTPException(status_code=404, detail="event not found")
+
+
+@router.delete("/{event_id}")
+def delete_event(event_id: int, request: Request, session: Session = Depends(get_session)):
+    storage = getattr(request.app.state, "storage", None)
+    try:
+        tracking.delete_event(session, event_id, storage=storage)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="event not found")
+    return {"deleted": True, "id": event_id}

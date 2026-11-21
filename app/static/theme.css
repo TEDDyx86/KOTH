@@ -314,6 +314,23 @@ h2 { font-size: 1.15rem; margin: 0 0 0.75rem; }
   color: #ffffff;
 }
 
+.btn.danger {
+  background: rgba(126, 16, 23, 0.28);
+  border: 1px solid rgba(224, 27, 36, 0.45);
+  color: #ff999e;
+}
+
+.btn.danger:hover {
+  background: #a51018;
+  border-color: var(--accent-bright);
+  color: #ffffff;
+}
+
+.btn-sm {
+  padding: 0.22rem 0.6rem;
+  font-size: 0.78rem;
+}
+
 table.list { width: 100%; border-collapse: collapse; }
 table.list th, table.list td {
   text-align: left;

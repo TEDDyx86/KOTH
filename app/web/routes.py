@@ -28,7 +28,7 @@ from ..agents.providers import (
 from ..database import get_session
 from ..models import (
     Attachment, AttachmentType, Attempt, AttemptResult, AttemptType,
-    ChallengeStatus, Difficulty, Event,
+    ChallengeStatus, Difficulty, Event, EventStatus,
 )
 from ..services import tracking
 from ..services.storage import StorageService
@@ -623,6 +623,49 @@ def create_event_form(request: Request, name: str = Form(...),
     return RedirectResponse(f"/events/{event.id}", status_code=303)
 
 
+def _safe_next(next_url: str | None, fallback: str) -> str:
+    if next_url and next_url.startswith("/") and not next_url.startswith("//"):
+        return next_url
+    return fallback
+
+
+@router.post("/events/{event_id}/edit")
+def edit_event_form(event_id: int,
+                    name: str = Form(...),
+                    url: str = Form(""),
+                    flag_format: str = Form(""),
+                    status: str = Form("upcoming"),
+                    next: str = Form(""),
+                    session: Session = Depends(get_session)):
+    try:
+        ev_status = EventStatus(status)
+    except ValueError:
+        ev_status = EventStatus.upcoming
+    try:
+        tracking.update_event(
+            session, event_id,
+            name=name.strip(),
+            url=url,
+            flag_format=flag_format,
+            status=ev_status,
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="event not found")
+    return RedirectResponse(_safe_next(next, f"/events/{event_id}"), status_code=303)
+
+
+@router.post("/events/{event_id}/delete")
+def delete_event_form(request: Request, event_id: int,
+                      next: str = Form(""),
+                      session: Session = Depends(get_session)):
+    storage = getattr(request.app.state, "storage", None)
+    try:
+        tracking.delete_event(session, event_id, storage=storage)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="event not found")
+    return RedirectResponse(_safe_next(next, "/dashboard"), status_code=303)
+
+
 @router.post("/challenges/quick")
 def create_challenge_quick(request: Request,
                            event_id: str = Form(""),
@@ -727,17 +770,29 @@ def edit_challenge_form(challenge_id: int,
                         category: str = Form("misc"),
                         points: int = Form(100),
                         difficulty: str = Form(""),
+                        status: str = Form(""),
+                        flag: str | None = Form(None),
                         target: str = Form(""),
                         tags: str = Form(""),
                         description: str = Form(""),
                         session: Session = Depends(get_session)):
+    parsed_diff = _parse_difficulty(difficulty)
+    parsed_status = None
+    if status.strip():
+        try:
+            parsed_status = ChallengeStatus(status.strip())
+        except ValueError:
+            parsed_status = None
     try:
         tracking.update_challenge(
             session, challenge_id,
             title=title.strip(),
             category=category,
             points=points,
-            difficulty=_parse_difficulty(difficulty),
+            difficulty=parsed_diff,
+            clear_difficulty=(parsed_diff is None),
+            status=parsed_status,
+            flag=flag,
             target=target.strip(),
             tags=tags,
             description=description,
@@ -745,6 +800,19 @@ def edit_challenge_form(challenge_id: int,
     except LookupError:
         raise HTTPException(status_code=404, detail="challenge not found")
     return RedirectResponse(f"/challenges/{challenge_id}", status_code=303)
+
+
+@router.post("/challenges/{challenge_id}/delete")
+def delete_challenge_form(request: Request, challenge_id: int,
+                          next: str = Form(""),
+                          session: Session = Depends(get_session)):
+    ch = tracking.get_challenge(session, challenge_id)
+    if ch is None:
+        raise HTTPException(status_code=404, detail="challenge not found")
+    fallback = f"/events/{ch.event_id}"
+    storage = getattr(request.app.state, "storage", None)
+    tracking.delete_challenge(session, challenge_id, storage=storage)
+    return RedirectResponse(_safe_next(next, fallback), status_code=303)
 
 
 @router.post("/challenges/{challenge_id}/attempts")

@@ -26,6 +26,13 @@ class ChallengeCreate(BaseModel):
 class ChallengeUpdate(BaseModel):
     status: ChallengeStatus | None = None
     flag: str | None = None
+    title: str | None = None
+    category: str | None = None
+    points: int | None = None
+    difficulty: Difficulty | None = None
+    description: str | None = None
+    target: str | None = None
+    tags: str | None = None
 
 
 class AttemptCreate(BaseModel):
@@ -79,10 +86,27 @@ def challenge_detail(challenge_id: int, session: Session = Depends(get_session))
 def update_challenge(challenge_id: int, body: ChallengeUpdate,
                      session: Session = Depends(get_session)):
     try:
-        return tracking.update_challenge(session, challenge_id,
-                                         status=body.status, flag=body.flag)
+        return tracking.update_challenge(
+            session, challenge_id,
+            status=body.status, flag=body.flag,
+            title=body.title, category=body.category,
+            points=body.points, difficulty=body.difficulty,
+            description=body.description, target=body.target,
+            tags=body.tags,
+        )
     except LookupError:
         raise HTTPException(status_code=404, detail="challenge not found")
+
+
+@router.delete("/challenges/{challenge_id}")
+def delete_challenge(challenge_id: int, request: Request,
+                     session: Session = Depends(get_session)):
+    storage = getattr(request.app.state, "storage", None)
+    try:
+        tracking.delete_challenge(session, challenge_id, storage=storage)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="challenge not found")
+    return {"deleted": True, "id": challenge_id}
 
 
 @router.post("/challenges/{challenge_id}/attempts", response_model=Attempt)

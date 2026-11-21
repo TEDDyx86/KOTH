@@ -13,19 +13,41 @@
     · {{ summary.attempt_count }} tentativas
     {% if summary.active_seconds is not none %} · {{ (summary.active_seconds / 60) | round(1) }} min ativos{% endif %}
   </p>
-  <a class="btn" href="/challenges/{{ challenge.id }}/agent">Abrir Painel do Agente →</a>
+  <div class="row-actions">
+    <a class="btn" href="/challenges/{{ challenge.id }}/agent">Abrir Painel do Agente →</a>
+    <button type="button" class="btn ghost" onclick="var d=document.getElementById('edit-challenge'); d.open=true; d.scrollIntoView({behavior:'smooth'});">Editar</button>
+    <form method="post" action="/challenges/{{ challenge.id }}/delete"
+          onsubmit="return confirm('Apagar o challenge {{ challenge.title|e }} e todos os seus anexos/tentativas?');">
+      <input type="hidden" name="next" value="/events/{{ challenge.event_id }}">
+      <button class="btn danger" type="submit">Apagar</button>
+    </form>
+  </div>
 </div>
 
 <section class="card">
   <h2>Descrição</h2>
   <pre style="white-space: pre-wrap;">{{ challenge.description or "—" }}</pre>
-  <details style="margin-top:0.75rem;">
-    <summary style="color: var(--muted); cursor: pointer;">Editar challenge (target, categoria, descrição…)</summary>
+  <details id="edit-challenge" style="margin-top:0.75rem;">
+    <summary style="color: var(--muted); cursor: pointer;">Editar challenge (título, status, flag, target, categoria, descrição…)</summary>
     <form method="post" action="/challenges/{{ challenge.id }}/edit" style="display:grid; gap:0.6rem; margin-top:0.75rem;">
       {% set ch = challenge %}
       {% include "_challenge_fields.html" %}
+      <div class="form-grid">
+        <label style="font-size:0.82rem; color:var(--muted);">
+          Status
+          <select name="status">
+            {% for st in ["open","solved","gave_up"] %}
+              <option value="{{ st }}" {% if challenge.status.value == st %}selected{% endif %}>{{ st }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label style="font-size:0.82rem; color:var(--muted);">
+          Flag (opcional)
+          <input name="flag" value="{{ challenge.flag or '' }}" placeholder="CTF{...}">
+        </label>
+      </div>
       <div class="row-actions">
-        <button class="btn ghost" type="submit">Salvar alterações</button>
+        <button class="btn" type="submit">Salvar alterações</button>
       </div>
     </form>
   </details>
@@ -94,4 +116,10 @@
     </form>
   </details>
 </section>
+<script>
+if (window.location.hash === '#edit-challenge') {
+  var d = document.getElementById('edit-challenge');
+  if (d) d.open = true;
+}
+</script>
 {% endblock %}
