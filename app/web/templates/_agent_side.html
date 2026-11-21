@@ -33,7 +33,7 @@
     modo: {{ sess.mode or 'supervised' }} · dispatches: {{ sess.dispatch_count or 0 }}{% if sess.total_tokens %} · tokens: {{ sess.total_tokens }}{% endif %}
   </p>
   {% if sess.error %}
-  <p class="mono" style="color: var(--accent);">erro: {{ sess.error }}</p>
+  <p class="mono" style="color: var(--error);">erro: {{ sess.error }}</p>
   {% endif %}
   {% if sess.state == "awaiting_approval" and sess.pending_decision %}
   <div class="checkpoint">

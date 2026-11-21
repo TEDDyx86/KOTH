@@ -1,5 +1,6 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+{% set active_theme = (request.app.state.ui_theme if (request is defined and request and request.app and request.app.state and request.app.state.ui_theme) else 'crimson') %}
+<html lang="pt-BR" data-theme="{{ active_theme }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

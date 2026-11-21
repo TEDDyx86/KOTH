@@ -30,9 +30,11 @@ def create_app(engine=None, storage_dir: Path | None = None) -> FastAPI:
     from .agents.providers import apply_saved_keys_to_env
     from .config import settings
     from .services.storage import StorageService
+    from .web.theme import load_active_theme
 
     app.state.storage = StorageService(storage_dir or settings.storage_dir)
     apply_saved_keys_to_env(app.state.storage.storage_dir)
+    app.state.ui_theme = load_active_theme(app.state.storage.storage_dir)
 
     from .api import challenges as challenges_module
     from .api import events as events_module

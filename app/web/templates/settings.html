@@ -14,6 +14,7 @@
     {% elif saved == "models" %}Modelos do Orquestrador atualizados em config/models.yaml e aplicados imediatamente.
     {% elif saved == "sandbox" %}Modo do Sandbox atualizado em config/tools.yaml e aplicado ao runtime.
     {% elif saved == "mcp" %}Servidores MCP atualizados em config/mcp.yaml e aplicados aos especialistas.
+    {% elif saved == "theme" %}Tema visual atualizado e aplicado a todo o sistema.
     {% endif %}
   </p>
 </div>
@@ -438,7 +439,7 @@
 
     <details>
       <summary class="mono" style="cursor:pointer; color:var(--muted); font-size:0.83rem;">Snippet MCP para Claude Code / Codex / Gemini / Cursor</summary>
-      <pre class="mono" style="margin-top:0.5rem; font-size:0.78rem; padding:0.7rem; background:#0d0708; border:1px solid var(--border); overflow-x:auto;">{{ mcp_snippet }}</pre>
+      <pre class="mono" style="margin-top:0.5rem; font-size:0.78rem; padding:0.7rem; background:var(--input-bg); border:1px solid var(--panel-edge); overflow-x:auto;">{{ mcp_snippet }}</pre>
     </details>
   </section>
 
@@ -461,25 +462,46 @@
 <!-- TAB 4: IDENTIDADE VISUAL -->
 <div id="tab-brand" class="koth-tab-panel {% if active_tab == 'brand' %}active{% endif %}">
   <section class="card">
-    <h2>Identidade Visual KOTH</h2>
-    <p style="color:var(--muted); font-size:0.85rem;">Ativos visuais ativos no sistema:</p>
-    <div class="brand-grid">
-      <div class="brand-option">
-        <img src="/static/brand/koth_brand_lockup.jpg" alt="Header Oficial — KOTH Lockup">
-        <strong class="mono">Header Oficial — King Of The Hill</strong>
-      </div>
-      <div class="brand-option">
-        <img src="/static/brand/koth_crest_3.jpg" alt="Favicon / Brasão Topográfico">
-        <strong class="mono">Favicon — Brasão Topográfico &gt;_</strong>
-      </div>
-      <div class="brand-option">
-        <img src="/static/brand/koth_ascii_bg.jpg" alt="Fundo do Sistema — Alpinista Cyber ASCII">
-        <strong class="mono">Fundo do Sistema — Alpinista ASCII</strong>
-      </div>
-      <div class="brand-option">
-        <img src="/static/brand/koth_hero_2.jpg" alt="Hero README — Alpinista Cyber-Tático">
-        <strong class="mono">README / Hero — Alpinista Cyber-Tático</strong>
-      </div>
+    <h2>Tema &amp; Identidade Visual</h2>
+    <p style="color:var(--muted); font-size:0.85rem; margin-bottom:1rem;">
+      Selecione uma paleta completa para alterar todo o sistema (fundo em degradê preto, arte ASCII, sidebar, cards, botões, badges, links e terminal OP):
+    </p>
+    <div class="theme-grid">
+      {% for t in ui_themes %}
+      {% set is_cur = (active_theme == t.id) %}
+      <form method="post" action="/settings/theme" class="theme-card {% if is_cur %}active{% endif %}"
+            onsubmit="document.documentElement.setAttribute('data-theme', '{{ t.id }}');">
+        <input type="hidden" name="theme" value="{{ t.id }}">
+        <div class="theme-preview"
+             style="background: linear-gradient(145deg, {{ t.bg_0 }} 0%, {{ t.bg_2 }} 100%);"
+             aria-hidden="true">
+          <div class="theme-preview-bar">
+            <span class="theme-swatch-pill" style="background: {{ t.accent_bright }};"></span>
+            <div class="theme-preview-dots">
+              <span style="background: {{ t.accent }};"></span>
+              <span style="background: {{ t.accent_bright }};"></span>
+              <span style="background: rgba(255,255,255,0.35);"></span>
+            </div>
+          </div>
+          <div style="display:flex; gap:0.4rem; align-items:center;">
+            <span style="display:inline-block; height:18px; width:56px; border-radius:4px; background:{{ t.accent }};"></span>
+            <span style="display:inline-block; height:18px; width:44px; border-radius:4px; border:1px solid {{ t.accent_bright }}; opacity:0.65;"></span>
+          </div>
+        </div>
+        <div class="theme-meta">
+          <strong class="mono">{{ t.name }}</strong>
+          {% if is_cur %}
+            <span class="badge flag-ok">Ativo</span>
+          {% else %}
+            <span class="badge">{{ t.id }}</span>
+          {% endif %}
+        </div>
+        <p class="theme-sub">{{ t.subtitle }}</p>
+        <button class="btn {% if is_cur %}ghost{% endif %}" type="submit" {% if is_cur %}disabled{% endif %}>
+          {% if is_cur %}Tema selecionado{% else %}Aplicar {{ t.name }}{% endif %}
+        </button>
+      </form>
+      {% endfor %}
     </div>
   </section>
 </div>

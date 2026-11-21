@@ -57,6 +57,7 @@ from ..tooling.sandbox import (
     docker_status,
     switch_tools_mode,
 )
+from .theme import load_active_theme, save_active_theme, theme_options
 
 router = APIRouter()
 
@@ -338,10 +339,23 @@ def settings_page(request: Request, saved: str | None = None,
         "cli_providers": cli_providers,
         "has_opencode_auth": opencode_auth_path().exists(),
         "knowledge_count": knowledge_count,
+        "ui_themes": theme_options(),
+        "active_theme": getattr(request.app.state, "ui_theme", None) or load_active_theme(storage_dir),
         "saved": saved,
         "active_tab": tab if tab in ("providers", "models", "runtime", "brand") else "providers",
     })
     return templates.TemplateResponse(request, "settings.html", ctx)
+
+
+@router.post("/settings/theme")
+def settings_set_theme(request: Request, theme: str = Form("crimson")):
+    storage_dir = request.app.state.storage.storage_dir
+    try:
+        chosen = save_active_theme(theme, storage_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    request.app.state.ui_theme = chosen
+    return RedirectResponse("/settings?tab=brand&saved=theme", status_code=303)
 
 
 @router.get("/settings/models/options")
