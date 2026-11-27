@@ -179,12 +179,61 @@ def _help_text() -> str:
         "[KOTH // CLI] Comandos disponíveis:",
         "  • Texto livre + anexos → conversa com o OP ou envia um desafio direto (ex: cole o enunciado)",
         "  • /solve <título> | cat=web | target=host:port | pts=300 | <descrição> → cria e dispara já",
+        "  • /resume <id> [| target=host:port] [| extra=10] [| clear] [| recon] [| <dica>] → retoma sessão encerrada",
         "  • /rank   → ranking tático do Planner (pontos + dificuldade)",
         "  • /events → lista eventos cadastrados",
         "  • /status → checa LLM, ferramentas (Tool Doctor) e desafios abertos",
         "  • /clear  → limpa o histórico do terminal",
         "  • /help   → mostra esta ajuda",
     ])
+
+
+def _parse_slash_resume(raw_args: str) -> dict:
+    """Parse `/resume <id> [| target=...] [| extra=10] [| clear] [| recon] [| mode=auto] [| dica]`."""
+    parts = [p.strip() for p in (raw_args or "").split("|") if p.strip()]
+    challenge_id: int | None = None
+    target: str | None = None
+    extra_attempts: int | None = None
+    clear_dead_ends = False
+    rerun_recon = False
+    mode_override: str | None = None
+    feedback_parts: list[str] = []
+
+    for idx, part in enumerate(parts):
+        if idx == 0:
+            m_id = re.match(r"^#?(\d+)(?:\s+(.+))?$", part)
+            if m_id:
+                challenge_id = int(m_id.group(1))
+                if m_id.group(2):
+                    feedback_parts.append(m_id.group(2).strip())
+                continue
+        m_kv = re.match(r"^(target|extra|extra_attempts|mode)\s*=\s*(.+)$", part, re.I)
+        if m_kv:
+            k, v = m_kv.group(1).lower(), m_kv.group(2).strip()
+            if k == "target":
+                target = v
+            elif k in ("extra", "extra_attempts") and v.isdigit():
+                extra_attempts = int(v)
+            elif k == "mode" and v.lower() in ("auto", "supervised"):
+                mode_override = v.lower()
+            continue
+        low = part.lower()
+        if low in ("clear", "clear_dead_ends"):
+            clear_dead_ends = True
+        elif low in ("recon", "rerun_recon"):
+            rerun_recon = True
+        else:
+            feedback_parts.append(part)
+
+    return {
+        "challenge_id": challenge_id,
+        "target": target,
+        "extra_attempts": extra_attempts,
+        "clear_dead_ends": clear_dead_ends,
+        "rerun_recon": rerun_recon,
+        "mode": mode_override,
+        "feedback": " | ".join(feedback_parts).strip() or None,
+    }
 
 
 def _resolve_event(session: Session, event_id: int | None) -> Event | None:
@@ -353,6 +402,85 @@ def process_cli_turn(
         rec = CliMessageRecord(role="op", content=txt)
     elif cmd == "/status":
         rec = CliMessageRecord(role="op", content=_format_status(session, active_event))
+    elif cmd == "/resume":
+        raw_arg = cleaned.split(None, 1)[1] if " " in cleaned else ""
+        parsed = _parse_slash_resume(raw_arg)
+        cid = parsed["challenge_id"]
+        if cid is None:
+            rec = CliMessageRecord(
+                role="op",
+                content="[KOTH // OP] Uso: `/resume <challenge_id> [| target=host:port] [| extra=10] [| clear] [| recon] [| dica]`",
+            )
+        else:
+            ch = tracking.get_challenge(session, cid)
+            if ch is None:
+                rec = CliMessageRecord(role="op", content=f"[KOTH // OP] Desafio #{cid} não encontrado.")
+            elif orch is None:
+                rec = CliMessageRecord(role="op", content="[KOTH // OP] Runtime indisponível — não foi possível retomar.")
+            else:
+                latest = orch.latest_for_challenge(session, ch.id) if hasattr(orch, "latest_for_challenge") else None
+                if latest is None:
+                    rec = CliMessageRecord(
+                        role="op",
+                        content=f"[KOTH // OP] Desafio #{ch.id} ({ch.title}) ainda não possui sessão encerrada para retomar.",
+                        challenge_id=ch.id,
+                    )
+                elif latest.state == "solved":
+                    rec = CliMessageRecord(
+                        role="op",
+                        content=f"[KOTH // OP] Desafio #{ch.id} ({ch.title}) já está resolvido.",
+                        challenge_id=ch.id,
+                        session_id=latest.id,
+                    )
+                elif latest.state in ("running", "awaiting_approval"):
+                    rec = CliMessageRecord(
+                        role="op",
+                        content=f"[KOTH // OP] Desafio #{ch.id} ({ch.title}) já tem sessão ativa ({latest.state}).",
+                        challenge_id=ch.id,
+                        session_id=latest.id,
+                    )
+                else:
+                    chosen_mode = parsed["mode"] or mode
+                    try:
+                        if chosen_mode == "auto" and hasattr(orch, "resume_background"):
+                            resumed = orch.resume_background(
+                                session.get_bind(),
+                                session,
+                                latest.id,
+                                mode=chosen_mode,
+                                feedback=parsed["feedback"],
+                                new_target=parsed["target"],
+                                extra_attempts=parsed["extra_attempts"],
+                                clear_dead_ends=parsed["clear_dead_ends"],
+                                rerun_recon=parsed["rerun_recon"],
+                            )
+                        else:
+                            resumed = orch.resume(
+                                session,
+                                latest.id,
+                                mode=chosen_mode,
+                                feedback=parsed["feedback"],
+                                new_target=parsed["target"],
+                                extra_attempts=parsed["extra_attempts"],
+                                clear_dead_ends=parsed["clear_dead_ends"],
+                                rerun_recon=parsed["rerun_recon"],
+                            )
+                        rec = CliMessageRecord(
+                            role="op",
+                            content=(
+                                f"[KOTH // OP] Missão retomada (#{resumed.resume_count}) → #{ch.id} {ch.title} "
+                                f"| modo={resumed.mode} | sessão={resumed.id[:8]}"
+                            ),
+                            challenge_id=ch.id,
+                            session_id=resumed.id,
+                        )
+                    except (ValueError, KeyError, Exception) as exc:
+                        rec = CliMessageRecord(
+                            role="op",
+                            content=f"[KOTH // OP] Não foi possível retomar #{ch.id}: {exc}",
+                            challenge_id=ch.id,
+                            session_id=latest.id,
+                        )
     elif cmd in ("/solve", "/new") or force_launch:
         raw_arg = cleaned.split(None, 1)[1] if cmd in ("/solve", "/new") and " " in cleaned else cleaned
         data = _parse_slash_launch(raw_arg, file_names) if cmd in ("/solve", "/new") else _heuristic_extract(cleaned, file_names)

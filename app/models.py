@@ -115,6 +115,11 @@ class AgentSessionRecord(SQLModel, table=True):
     findings_json: str = "[]"
     reports_json: str = "[]"
     final_report_json: str | None = None
+    blackboard_json: str = "{}"
+    telemetry_json: str = "[]"
+    resume_count: int = 0
+    extra_attempts: int = 0
+    budget_started_at: datetime | None = None
     error: str | None = None
     total_tokens: int = 0
     created_at: datetime = Field(default_factory=utcnow)

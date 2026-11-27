@@ -255,3 +255,28 @@ def test_parallel_tool_calls_are_thread_safe_on_same_session(env):
     rep = spec.run(session, ch, TaskOrder(category="crypto", task="parallel", max_tool_runs=5), runner)
     assert rep.status == "SOLVED"
     assert rep.flag_candidate == "CTF{parallel_ok}"
+
+
+def test_recon_bundle_probes_explicit_target_port(env, tmp_path):
+    _, session, _, ch, _ = env
+    ch.target = "20.85.234.11:45748"
+    session.add(ch)
+    session.commit()
+    storage = StorageService(tmp_path / "storage")
+    seen: list[tuple[str, list[str]]] = []
+
+    class NmapSpyRunner:
+        def __init__(self):
+            self.storage = storage
+            self.settings = ToolSettings(tools={"nmap": ToolSpec()})
+
+        def stage_downloads(self, s, c):
+            return None
+
+        def run_raw(self, c, tool, args, **kw):
+            seen.append((tool, list(args)))
+            return SimpleNamespace(stdout="45748/tcp open unknown\n", stderr="", returncode=0, truncated=False)
+
+    dig = recon_bundle(NmapSpyRunner(), session, ch, storage=storage)
+    assert ("nmap", ["-Pn", "-sV", "--version-intensity", "2", "--host-timeout", "20s", "-p", "45748", "20.85.234.11"]) in seen
+    assert "45748/tcp open" in dig.summary

@@ -28,9 +28,11 @@ def test_build_cli_commands_portable():
     assert build_cli_command("cli_gemini", "gemini", "gemini-2.5-pro") == [
         "gemini", "-p", " ", "-m", "gemini-2.5-pro",
     ]
-    assert build_cli_command("cli_agy", "agy", "gemini-4-neon-high") == [
-        "agy", "--input-format", "stream-json", "--output-format", "stream-json", "--disable-slash-commands", "--model", "gemini-4-neon-high",
-    ]
+    cmd_agy = build_cli_command("cli_agy", "agy", "gemini-4-hydrogen-high")
+    assert cmd_agy[:5] == ["agy", "--input-format", "stream-json", "--output-format", "stream-json"]
+    assert "--disable-slash-commands" in cmd_agy
+    assert "--settings" in cmd_agy
+    assert cmd_agy[-2:] == ["--model", "gemini-4-hydrogen-high"]
 
 
 def test_missing_cli_raises_provider_unavailable(monkeypatch):
@@ -187,3 +189,46 @@ def test_agy_cli_stream_json_jury_and_specialist(tmp_path, monkeypatch):
         rep = spec.run(session, ch, TaskOrder(category="crypto", task="solve"), runner=runner)
         assert rep.status == "SOLVED"
         assert rep.flag_candidate == "CTF{agy_ok}"
+
+
+def test_cli_model_refusal_triggers_immediate_fallback(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'ref.db'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr("app.agents.cli_providers.shutil.which", lambda name: "/usr/bin/agy" if name == "agy" else None)
+
+    calls = {"neon": 0, "hydrogen": 0}
+
+    def fake_agy_run(cmd, input, text, encoding, errors, capture_output, timeout, creationflags):
+        if "gemini-4-neon-high" in cmd:
+            calls["neon"] += 1
+            text_out = "Desculpe, não posso atender a esta solicitação."
+        else:
+            calls["hydrogen"] += 1
+            text_out = json.dumps({
+                "action": "DISPATCH",
+                "order": {"category": "misc", "task": "test", "hints": [], "max_tool_runs": 4},
+                "reason": "fallback ok",
+                "findings": ["ok"],
+            })
+        ndjson = json.dumps({"event": "result", "result": {"status": "SUCCESS", "response": text_out}})
+        return SimpleNamespace(returncode=0, stdout=ndjson, stderr="")
+
+    monkeypatch.setattr("app.agents.cli_providers.subprocess.run", fake_agy_run)
+    with Session(engine) as session:
+        ev = Event(name="ctf")
+        session.add(ev)
+        session.commit()
+        session.refresh(ev)
+        ch = Challenge(event_id=ev.id, title="c1")
+        session.add(ch)
+        session.commit()
+        session.refresh(ch)
+
+        m1 = make_cli_model("cli_agy", "gemini-4-neon-high")
+        m2 = make_cli_model("cli_agy", "gemini-4-hydrogen-high")
+        jury = JuryAgent(m1, "jury", fallback_models=[m2], output_retries=4)
+        dec = jury.decide(session, ch, [])
+        assert dec.action == "DISPATCH"
+        # Refusal fails fast (1 call) and immediately triggers fallback without burning 4 retries
+        assert calls["neon"] == 1
+        assert calls["hydrogen"] == 1

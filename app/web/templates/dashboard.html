@@ -20,9 +20,19 @@
       {% endif %}
       <span class="dash-sep" aria-hidden="true">·</span>
       <span>sandbox <strong class="dash-mode">{{ sandbox_mode }}</strong></span>
+      {% if dash_stats.total_cost_usd %}
+        <span class="dash-sep" aria-hidden="true">·</span>
+        <span>custo est. <strong>${{ '%.4f'|format(dash_stats.total_cost_usd) }}</strong></span>
+      {% endif %}
     </div>
   </div>
   <div class="row-actions">
+    {% if dash_stats.open_count > 0 %}
+    <form method="post" action="/dashboard/run-batch" style="margin:0;">
+      <input type="hidden" name="count" value="3">
+      <button type="submit" class="btn ghost">Rodar Top 3 em paralelo</button>
+    </form>
+    {% endif %}
     <button type="button" class="btn" id="dash-toggle-launch" aria-expanded="{{ 'true' if dash_stats.open_count == 0 else 'false' }}" onclick="kothToggleLaunch()">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
       <span>Novo challenge</span>
@@ -118,26 +128,27 @@
               <td class="mono tabular">{{ c.points }}</td>
               <td class="mono dash-target">{{ c.target or "—" }}</td>
               <td>
-                {% if st and st.state == "running" %}
-                  <span class="badge warn mono">rodando ({{ st.dispatch_count }})</span>
-                {% elif st and st.state == "awaiting_approval" %}
-                  <span class="badge warn mono">checkpoint</span>
-                {% elif st %}
-                  <span class="badge solved mono">{{ st.state }}</span>
+                {% if st %}
+                  <span class="badge {{ st.state|badge_for }} mono" data-state="{{ st.state }}">
+                    {% if st.state == "running" %}<span class="koth-dot-pulse"></span>{% endif %}
+                    {{ st.state|state_label }}{% if st.state == "running" %} ({{ st.dispatch_count }}){% endif %}
+                  </span>
                 {% else %}
-                  <span class="dash-idle mono">pronto</span>
+                  <span class="dash-idle mono">Disponível</span>
                 {% endif %}
               </td>
               <td class="dash-row-action">
                 <div class="row-actions" style="justify-content:flex-end; flex-wrap:nowrap;">
                   {% if st and st.state == "awaiting_approval" %}
                     <a class="btn btn-sm" href="/challenges/{{ c.id }}/agent">Aprovar →</a>
+                  {% elif st and st.state in ("gave_up", "rejected") %}
+                    <a class="btn btn-sm" href="/challenges/{{ c.id }}/agent">Retomar →</a>
                   {% else %}
                     <a class="btn ghost btn-sm" href="/challenges/{{ c.id }}/agent">Agente →</a>
                   {% endif %}
                   <a class="btn ghost btn-sm" href="/challenges/{{ c.id }}#edit-challenge">Editar</a>
                   <form method="post" action="/challenges/{{ c.id }}/delete"
-                        onsubmit="return confirm('Apagar o challenge {{ c.title|e }}?');">
+                        onsubmit="return kothConfirmForm(this, 'Apagar o challenge {{ c.title|e }}?');">
                     <input type="hidden" name="next" value="/dashboard">
                     <button class="btn danger btn-sm" type="submit">Apagar</button>
                   </form>
@@ -184,7 +195,7 @@
                 <span class="badge {% if ev.status.value == 'active' %}flag-ok{% else %}solved{% endif %}">{{ ev.status.value }}</span>
                 <a class="btn ghost btn-sm" href="/events/{{ ev.id }}#edit-event">Editar</a>
                 <form method="post" action="/events/{{ ev.id }}/delete"
-                      onsubmit="return confirm('Apagar o evento {{ ev.name|e }} e todos os seus challenges?');">
+                      onsubmit="return kothConfirmForm(this, 'Apagar o evento {{ ev.name|e }} e todos os seus challenges?');">
                   <input type="hidden" name="next" value="/dashboard">
                   <button class="btn danger btn-sm" type="submit">Apagar</button>
                 </form>

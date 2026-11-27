@@ -38,6 +38,7 @@ def _make_orchestrator(storage_dir) -> Orchestrator:
     jury_models = resolve_candidates_for_role("jury", jury_role, models_cfg)
     jury = JuryAgent(jury_models[0], persona_text=_persona_text("jury"),
                      fallback_models=jury_models[1:])
+    max_dispatch_tokens = int(agents_cfg.limits.get("max_dispatch_tokens", 350_000))
     specialists = {}
     for cat in SPECIALIST_CATEGORIES:
         role_key = f"specialist_{cat}"
@@ -48,6 +49,7 @@ def _make_orchestrator(storage_dir) -> Orchestrator:
             persona_text=_persona_text(role_key),
             fallback_models=cands[1:],
             category=cat,
+            max_dispatch_tokens=max_dispatch_tokens,
         )
     return Orchestrator(runner=runner, jury=jury, specialists=specialists,
                         agents_limits=agents_cfg.limits)
@@ -60,6 +62,25 @@ def get_orchestrator(request: Request) -> Orchestrator:
         orch = _make_orchestrator(request.app.state.storage)
         request.app.state._orchestrator = orch
     return orch
+
+
+def reload_orchestrator(app) -> None:
+    """Hot-reload runner/models/limits into the existing Orchestrator without losing active workers."""
+    orch = getattr(app.state, "_orchestrator", None)
+    if orch is None:
+        return
+    try:
+        fresh = _make_orchestrator(app.state.storage)
+    except Exception:
+        with orch._lock:
+            if not orch._active_workers:
+                app.state._orchestrator = None
+        return
+    with orch._lock:
+        orch.runner = fresh.runner
+        orch.jury = fresh.jury
+        orch.specialists = fresh.specialists
+        orch.limits = fresh.limits
 
 
 class StartIn(BaseModel):
@@ -79,6 +100,20 @@ class RejectIn(BaseModel):
 
 class TerminateIn(BaseModel):
     reason: str = ""
+
+
+class ResumeIn(BaseModel):
+    mode: Literal["supervised", "auto"] | None = None
+    feedback: str | None = None
+    target: str | None = None
+    extra_attempts: int | None = None
+    clear_dead_ends: bool = False
+    rerun_recon: bool = False
+    background: bool = False
+
+
+class HintIn(BaseModel):
+    feedback: str
 
 
 @router.post("/{challenge_id}/start", status_code=201)
@@ -130,6 +165,21 @@ def approve(session_id: str, body: ApproveIn, request: Request,
     return updated.to_dict()
 
 
+@router.post("/sessions/{session_id}/hint")
+def queue_session_hint(session_id: str, body: HintIn, request: Request,
+                       session: Session = Depends(get_session)):
+    orch = get_orchestrator(request)
+    agent_session = (orch.get_session(session, session_id)
+                     if hasattr(orch, "get_session") else orch.sessions.get(session_id))
+    if agent_session is None:
+        raise HTTPException(status_code=404, detail="unknown session")
+    try:
+        updated = orch.queue_feedback(session, session_id, body.feedback)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return updated.to_dict()
+
+
 @router.post("/sessions/{session_id}/reject")
 def reject(session_id: str, body: RejectIn, request: Request,
            session: Session = Depends(get_session)):
@@ -155,6 +205,60 @@ def terminate(session_id: str, request: Request,
         raise HTTPException(status_code=404, detail="unknown session")
     reason = body.reason if body else ""
     return orch.terminate(session, session_id, reason).to_dict()
+
+
+@router.post("/sessions/{session_id}/resume")
+def resume_session(session_id: str, request: Request,
+                   body: ResumeIn | None = None,
+                   session: Session = Depends(get_session)):
+    orch = get_orchestrator(request)
+    agent_session = (orch.get_session(session, session_id)
+                     if hasattr(orch, "get_session") else orch.sessions.get(session_id))
+    if agent_session is None:
+        raise HTTPException(status_code=404, detail="unknown session")
+    payload = body or ResumeIn()
+    try:
+        if payload.background and hasattr(orch, "resume_background"):
+            updated = orch.resume_background(
+                session.get_bind(),
+                session,
+                session_id,
+                mode=payload.mode,
+                feedback=payload.feedback,
+                new_target=payload.target,
+                extra_attempts=payload.extra_attempts,
+                clear_dead_ends=payload.clear_dead_ends,
+                rerun_recon=payload.rerun_recon,
+            )
+        else:
+            updated = orch.resume(
+                session,
+                session_id,
+                mode=payload.mode,
+                feedback=payload.feedback,
+                new_target=payload.target,
+                extra_attempts=payload.extra_attempts,
+                clear_dead_ends=payload.clear_dead_ends,
+                rerun_recon=payload.rerun_recon,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return updated.to_dict()
+
+
+@router.post("/sessions/{session_id}/hint")
+def queue_session_hint(session_id: str, body: HintIn, request: Request,
+                       session: Session = Depends(get_session)):
+    orch = get_orchestrator(request)
+    agent_session = (orch.get_session(session, session_id)
+                     if hasattr(orch, "get_session") else orch.sessions.get(session_id))
+    if agent_session is None:
+        raise HTTPException(status_code=404, detail="unknown session")
+    try:
+        updated = orch.queue_feedback(session, session_id, body.feedback)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return updated.to_dict()
 
 
 @router.get("/events/{event_id}/rank")

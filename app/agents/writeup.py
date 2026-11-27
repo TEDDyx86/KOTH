@@ -116,8 +116,10 @@ def build_challenge_writeup(
     if summary["active_seconds"] is not None:
         lines.append(f"- **Tempo ativo:** {summary['active_seconds'] / 60:.1f} min")
     if agent_session is not None:
+        resumes = int(getattr(agent_session, "resume_count", 0) or 0)
+        resume_part = f" · retomadas={resumes}" if resumes > 0 else ""
         lines.append(
-            f"- **Sessão KOTH:** `{agent_session.id[:8]}` · dispatches={agent_session.dispatch_count} · tokens={getattr(agent_session, 'total_tokens', 0)}"
+            f"- **Sessão KOTH:** `{agent_session.id[:8]}` · dispatches={agent_session.dispatch_count} · tokens={getattr(agent_session, 'total_tokens', 0)}{resume_part}"
         )
 
     if challenge.description:
@@ -289,6 +291,64 @@ def build_event_writeup(
         sections.append(build_challenge_writeup(session, ch, storage=storage))
         sections.append("\n---\n")
     return "\n".join(sections).strip() + "\n"
+
+
+def build_arsenal_digest(
+    session: Session,
+    challenge: Challenge,
+    *,
+    agent_session=None,
+    storage=None,
+) -> str:
+    """Build a concise, high-signal technique summary for FTS5 Arsenal indexing (no raw log bloat)."""
+    event = session.get(Event, challenge.event_id)
+    status_val = challenge.status.value if hasattr(challenge.status, "value") else str(challenge.status)
+    flag_val = challenge.flag or (
+        agent_session.final_report.flag_candidate
+        if agent_session and getattr(agent_session, "final_report", None)
+        else None
+    )
+    lines: list[str] = [
+        f"# Técnica — {challenge.title}",
+        f"- **Categoria:** `{challenge.category}` | **Evento:** {event.name if event else challenge.event_id} | **Status:** `{status_val}`",
+    ]
+    if flag_val:
+        lines.append(f"- **Flag:** `{flag_val}`")
+    if challenge.description:
+        lines += ["", "## Contexto", challenge.description.strip()[:600]]
+
+    bb = getattr(agent_session, "blackboard", None) if agent_session else None
+    facts = getattr(bb, "confirmed_facts", None) if bb else None
+    if facts:
+        lines += ["", "## Fatos & Vetores Confirmados"]
+        lines.extend(f"- {f}" for f in facts[:15])
+    elif agent_session and getattr(agent_session, "findings", None):
+        lines += ["", "## Achados Principais"]
+        lines.extend(f"- {f}" for f in agent_session.findings[:15])
+
+    dead_ends = getattr(bb, "dead_ends", None) if bb else None
+    if dead_ends:
+        lines += ["", "## Caminhos Descartados"]
+        lines.extend(f"- {d}" for d in dead_ends[:8])
+
+    if agent_session and getattr(agent_session, "reports", None):
+        lines += ["", "## Resumo dos Ciclos"]
+        for idx, rep in enumerate(agent_session.reports, 1):
+            if rep.status == "SOLVED" or idx == len(agent_session.reports):
+                tools = ", ".join(rep.tools_used) if rep.tools_used else "—"
+                lines.append(f"- Ciclo {idx} (`{rep.status}`, tools: {tools}): " + "; ".join(rep.findings[:4]))
+
+    attachments = list(session.exec(
+        select(Attachment).where(Attachment.challenge_id == challenge.id)
+    ).all())
+    download_names = {a.name for a in attachments if a.type == AttachmentType.download}
+    scripts = _sandbox_scripts(challenge, storage, download_names)[:3]
+    if scripts:
+        lines += ["", "## Script Solucionador"]
+        for rel, lang, content in scripts:
+            lines += [f"### `{rel}`", f"```{lang}", content.rstrip()[:6000], "```"]
+
+    return "\n".join(lines).strip() + "\n"
 
 
 def save_writeup_to_arsenal(

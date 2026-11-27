@@ -1,13 +1,16 @@
 {% if not sess %}
 <div class="card">
-  <h3>Status</h3>
-  <p style="color: var(--muted);">idle — nenhuma sessão</p>
+  <h3>Pronto para iniciar</h3>
+  <p style="color: var(--muted); font-size: 0.84rem; margin-top: -0.25rem;">
+    Nenhuma sessão ativa neste desafio.
+  </p>
   <div style="display:grid; gap:0.5rem;">
     <button class="btn" type="button"
             hx-post="/challenges/{{ challenge_id }}/agent/start"
             hx-vals='{"mode":"auto","background":"true"}'
             hx-target="#agent-side" hx-swap="innerHTML"
             hx-disabled-elt="this" hx-indicator="#start-spinner">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
       Iniciar Full Auto (sem aprovação)
     </button>
     <form hx-post="/challenges/{{ challenge_id }}/agent/start"
@@ -17,74 +20,220 @@
       <button class="btn ghost" hx-disabled-elt="this" hx-indicator="#start-spinner">
         Iniciar agente (supervisionado)
       </button>
-      <label style="font-size: 0.8rem; color: var(--muted);">
+      <label style="font-size: 0.8rem; color: var(--muted); display:flex; align-items:center; gap:0.35rem;">
         <input type="checkbox" name="background" value="true" style="width:auto;"> Executar em background
       </label>
     </form>
-    <span id="start-spinner" class="htmx-indicator mono" style="color: var(--warning);">
-      trabalhando (recon + júri, pode levar minutos)…
+    <span id="start-spinner" class="htmx-indicator mono" style="color: var(--warning); font-size:0.8rem;">
+      <svg class="koth-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+      Executando Recon + Júri…
     </span>
   </div>
 </div>
 {% else %}
+{% set cap = max_attempts or 20 %}
+{% set used = sess.dispatch_count or 0 %}
+{% set pct = (100 * used / cap) if cap > 0 else 0 %}
+{% if pct > 100 %}{% set pct = 100 %}{% endif %}
 <div class="card">
-  <h3>Status <span class="badge {{ sess.state|badge_for }}">{{ sess.state }}</span></h3>
-  <p class="mono tabular" style="color: var(--muted); font-size: 0.8rem;">
-    modo: {{ sess.mode or 'supervised' }} · dispatches: {{ sess.dispatch_count or 0 }}{% if sess.total_tokens %} · tokens: {{ sess.total_tokens }}{% endif %}
-  </p>
-  {% if sess.error %}
-  <p class="mono" style="color: var(--error);">erro: {{ sess.error }}</p>
+  <h3 style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
+    <span>Controle</span>
+    <span class="badge {{ sess.state|badge_for }}" data-state="{{ sess.state }}">
+      {% if sess.state == "running" %}<span class="koth-dot-pulse"></span>{% endif %}
+      {{ sess.state|state_label }}
+    </span>
+  </h3>
+
+  <div class="agent-budget">
+    <div class="mono tabular" style="display:flex; justify-content:space-between; font-size:0.78rem; color:var(--muted);">
+      <span>{{ "Full Auto" if sess.mode == "auto" else "Supervisionado" }} · {{ used }}/{{ cap }} ciclos</span>
+      <span>{% if sess.total_tokens %}{{ sess.total_tokens }} tok{% endif %}{% if sess.estimated_cost_usd %} · ${{ '%.4f'|format(sess.estimated_cost_usd) }}{% endif %}{% if sess.resume_count %} · {{ sess.resume_count }}x retomada{% endif %}</span>
+    </div>
+    <div class="meter" style="margin-top:0.3rem;">
+      <span style="width: {{ pct|round(0) }}%;"></span>
+    </div>
+  </div>
+
+  {% if sess.error and sess.state != "running" %}
+  <div class="koth-alert {{ 'warn' if 'recuperada' in sess.error else 'err' }}" style="margin-top:0.6rem;">
+    <span class="mono" style="font-size:0.78rem;">{{ sess.error }}</span>
+  </div>
   {% endif %}
+
   {% if sess.state == "awaiting_approval" and sess.pending_decision %}
   <div class="checkpoint">
-    <h4>Checkpoint — aguardando você</h4>
-    <p><strong class="mono">{{ sess.pending_decision.action }}</strong> — {{ sess.pending_decision.reason }}</p>
+    <h4>Aprovação pendente</h4>
+    <p style="margin:0.25rem 0;"><strong class="mono">{{ sess.pending_decision.action }}</strong> — {{ sess.pending_decision.reason }}</p>
     {% if sess.pending_decision.order %}
-    <p class="mono">→ {{ sess.pending_decision.order.category }}: {{ sess.pending_decision.order.task }}</p>
+    <p class="mono" style="font-size:0.82rem; color:var(--muted-light);">→ {{ sess.pending_decision.order.category }}: {{ sess.pending_decision.order.task }}</p>
     {% endif %}
     {% if sess.pending_decision.flag_candidate %}
-    <p class="mono">flag candidata: {{ sess.pending_decision.flag_candidate }}</p>
+    <p class="mono" style="font-size:0.82rem;">flag candidata: <code class="koth-copy-pill">{{ sess.pending_decision.flag_candidate }}</code></p>
     {% endif %}
+
     <div class="actions" style="flex-wrap: wrap;">
-      <button class="btn" hx-disabled-elt="this"
+      <button class="btn success btn-sm" hx-disabled-elt="this"
               hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/approve"
               hx-target="#agent-side" hx-swap="innerHTML"
-              hx-indicator="#cycle-spinner">Aprovar</button>
-      <button class="btn ghost" hx-disabled-elt="this"
+              hx-indicator="#cycle-spinner">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        Aprovar
+      </button>
+      <button class="btn btn-sm" hx-disabled-elt="this"
               hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/approve"
               hx-vals='{"mode":"auto","background":"true"}'
               hx-target="#agent-side" hx-swap="innerHTML"
               hx-indicator="#cycle-spinner">Aprovar + Full Auto</button>
-      <button class="btn ghost" hx-disabled-elt="this"
+      <button class="btn danger btn-sm" hx-disabled-elt="this"
               hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/terminate"
               hx-target="#agent-side" hx-swap="innerHTML"
               hx-indicator="#cycle-spinner"
-              hx-confirm="Encerrar esta sessão?">Rejeitar</button>
+              hx-confirm="Encerrar esta sessão? Você poderá retomá-la depois.">Rejeitar</button>
     </div>
-    <p id="cycle-spinner" class="htmx-indicator mono" style="color: var(--warning);">
-      executando ciclo (especialista + júri, pode levar minutos)…
+    <p id="cycle-spinner" class="htmx-indicator mono" style="color: var(--warning); font-size:0.78rem;">
+      <svg class="koth-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+      Executando ciclo…
     </p>
-    <form hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/adjust"
-          hx-target="#agent-side" hx-swap="innerHTML">
-      <input name="instruction" placeholder="instrução para o próximo passo do agente" required>
-      <button class="btn ghost">Ajustar com instrução</button>
-    </form>
+
+    <div class="cp-tabs" role="tablist">
+      <button type="button" class="cp-tab active" onclick="kothCpTab('inst', this)">Enviar instrução</button>
+      <button type="button" class="cp-tab" onclick="kothCpTab('tgt', this)">Trocar target</button>
+    </div>
+
+    <div id="cp-pane-inst">
+      <form hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/adjust"
+            hx-target="#agent-side" hx-swap="innerHTML"
+            style="display:grid; gap:0.4rem;">
+        <input name="instruction" placeholder="Ex: ignore /admin e teste SQLi no cookie" required>
+        <button class="btn ghost btn-sm">Ajustar com instrução</button>
+      </form>
+    </div>
+    <div id="cp-pane-tgt" style="display:none;">
+      <form hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/update-target"
+            hx-target="#agent-side" hx-swap="innerHTML"
+            style="display:grid; gap:0.4rem;">
+        <input name="target" placeholder="Novo host:porta ou URL (ex: http://ip:porta)" required>
+        <input type="hidden" name="mode" value="{{ sess.mode or 'auto' }}">
+        <input type="hidden" name="background" value="true">
+        <button class="btn ghost btn-sm" type="submit">Atualizar Target &amp; Retomar</button>
+      </form>
+    </div>
   </div>
   {% elif sess.state == "running" %}
-  <p class="mono" style="color: var(--warning);">
-    {% if sess.mode == "auto" %}executando em Full Auto…{% else %}executando ciclo…{% endif %}
-  </p>
-  <button class="btn ghost" hx-disabled-elt="this"
+  <div class="koth-alert warn" style="margin:0.55rem 0;">
+    <span class="mono" style="font-size:0.82rem; display:inline-flex; align-items:center; gap:0.45rem;">
+      <svg class="koth-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+      {% if sess.mode == "auto" %}Executando em Full Auto…{% else %}Executando ciclo…{% endif %}
+    </span>
+  </div>
+  <form hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/hint"
+        hx-target="#agent-side" hx-swap="innerHTML"
+        style="display:grid; gap:0.4rem; margin:0.5rem 0 0.65rem;">
+    <input name="feedback" placeholder="Dica para o próximo ciclo (sem parar)" required>
+    <button class="btn ghost btn-sm" type="submit">Enviar dica ao vivo</button>
+    {% if sess.queued_feedback %}
+    <span class="mono" style="font-size:0.75rem; color:var(--warning);">
+      {{ sess.queued_feedback|length }} dica(s) na fila para o Júri
+    </span>
+    {% endif %}
+  </form>
+  <button class="btn danger btn-sm" hx-disabled-elt="this"
           hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/terminate"
           hx-target="#agent-side" hx-swap="innerHTML"
-          hx-confirm="Parar a execução agora?">Parar sessão</button>
+          hx-confirm="Parar a execução agora? Você poderá retomar depois.">Parar sessão</button>
   {% elif sess.state == "solved" %}
-  <p class="mono" style="color: var(--flag-ok);">solved — flag validada</p>
-  {% if sess.final_report and sess.final_report.flag_candidate %}
-  <p class="mono" style="color: var(--flag-ok);">flag: {{ sess.final_report.flag_candidate }}</p>
-  {% endif %}
+  <div class="koth-alert ok" data-state="solved" style="margin-top:0.55rem;">
+    <div style="min-width:0; flex:1;">
+      <strong style="color:#56d364;">Flag validada com sucesso</strong>
+      {% if sess.final_report and sess.final_report.flag_candidate %}
+      <div style="margin-top:0.35rem; display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem;">
+        <code class="mono koth-copy-pill">{{ sess.final_report.flag_candidate }}</code>
+        <button type="button" class="btn success btn-xs" onclick="kothCopy('{{ sess.final_report.flag_candidate|e }}', this)">Copiar</button>
+      </div>
+      {% endif %}
+    </div>
+  </div>
   {% else %}
-  <p style="color: var(--muted);">sessão encerrada ({{ sess.state }})</p>
+  <div class="koth-alert warn" data-state="{{ sess.state }}" style="margin-top:0.55rem;">
+    <span style="font-size:0.8rem;">
+      {% if sess.state == "gave_up" %}
+        Sessão encerrada — agente desistiu após {{ used }} ciclo(s).
+      {% else %}
+        Sessão encerrada — interrompida pelo operador.
+      {% endif %}
+    </span>
+  </div>
+  <div class="resume-panel">
+    <h4>Retomar desafio</h4>
+    <p style="color: var(--muted); font-size: 0.79rem; margin: 0 0 0.45rem 0;">
+      Preserva findings, blackboard e histórico já descobertos, renovando o orçamento.
+    </p>
+    <form hx-post="/challenges/{{ challenge_id }}/agent/sessions/{{ sess.id }}/resume"
+          hx-target="#agent-side" hx-swap="innerHTML"
+          hx-indicator="#resume-spinner">
+      <textarea name="instruction" rows="3" placeholder="Dica, nova estratégia ou pista para retomar (opcional)"></textarea>
+      <input name="target" placeholder="Atualizar target (opcional, ex: http://ip:porta)">
+      <div class="resume-options">
+        <label style="display:flex; align-items:center; gap:0.3rem;">
+          + tentativas
+          <input id="resume-extra-input" type="number" name="extra_attempts" value="10" min="1" max="50" style="width:4.2rem;">
+        </label>
+        <div class="budget-chips">
+          <button type="button" class="budget-chip mono" onclick="kothSetExtra(5, this)">+5</button>
+          <button type="button" class="budget-chip mono active" onclick="kothSetExtra(10, this)">+10</button>
+          <button type="button" class="budget-chip mono" onclick="kothSetExtra(20, this)">+20</button>
+        </div>
+      </div>
+      <div class="resume-options">
+        <label style="display:flex; align-items:center; gap:0.3rem;">
+          <input type="checkbox" name="clear_dead_ends" value="true" style="width:auto;"> Limpar dead ends
+        </label>
+        <label style="display:flex; align-items:center; gap:0.3rem;">
+          <input type="checkbox" name="rerun_recon" value="true" style="width:auto;"> Refazer recon
+        </label>
+      </div>
+      <input type="hidden" name="background" value="true">
+      <div class="actions">
+        <button class="btn btn-sm" type="submit" name="mode" value="auto" hx-disabled-elt="this">
+          Retomar em Full Auto
+        </button>
+        <button class="btn ghost btn-sm" type="submit" name="mode" value="supervised" hx-disabled-elt="this">
+          Retomar (supervisionado)
+        </button>
+      </div>
+    </form>
+    <p id="resume-spinner" class="htmx-indicator mono" style="color: var(--warning); font-size:0.78rem;">
+      <svg class="koth-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+      Retomando sessão…
+    </p>
+    <div class="resume-reset" style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
+      <span style="font-size:0.76rem; color:var(--muted);">Descartar histórico?</span>
+      <button class="btn danger btn-xs" type="button"
+              hx-post="/challenges/{{ challenge_id }}/agent/start"
+              hx-vals='{"mode":"auto","background":"true"}'
+              hx-target="#agent-side" hx-swap="innerHTML"
+              hx-disabled-elt="this"
+              hx-confirm="Iniciar uma nova sessão limpa do zero (sem reaproveitar o histórico desta sessão)?">
+        Nova sessão do zero
+      </button>
+    </div>
+  </div>
   {% endif %}
 </div>
+<script>
+function kothCpTab(tab, btn) {
+  var pInst = document.getElementById('cp-pane-inst');
+  var pTgt = document.getElementById('cp-pane-tgt');
+  if (pInst) pInst.style.display = tab === 'inst' ? 'block' : 'none';
+  if (pTgt) pTgt.style.display = tab === 'tgt' ? 'block' : 'none';
+  document.querySelectorAll('.cp-tab').forEach(function (el) { el.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+}
+function kothSetExtra(val, btn) {
+  var inp = document.getElementById('resume-extra-input');
+  if (inp) inp.value = String(val);
+  document.querySelectorAll('.budget-chip').forEach(function (el) { el.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+}
+</script>
 {% endif %}

@@ -1,5 +1,5 @@
 import pytest
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.agents.orchestrator import AgentSession, Orchestrator
 from app.models import Challenge, Event, Note
@@ -34,7 +34,7 @@ def test_terminate_discards_decision_and_notes(env):
     assert out.state == "rejected"
     assert out.pending_decision is None
     assert any("terminated by operator" in f for f in out.findings)
-    notes = session.query(Note).filter(Note.challenge_id == ch.id).all()
+    notes = list(session.exec(select(Note).where(Note.challenge_id == ch.id)).all())
     assert any("[agent terminated]" in n.content for n in notes)
 
 

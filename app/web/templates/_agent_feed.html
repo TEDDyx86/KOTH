@@ -1,22 +1,110 @@
 {% if not sess %}
 <div class="card">
-  <p style="color: var(--muted);">Nenhuma sessão. Inicie o agente →</p>
+  <div class="koth-empty">
+    <strong>Nenhuma sessão iniciada</strong>
+    <p style="color: var(--muted); margin: 0.3rem 0 0;">
+      Use o painel lateral à direita para iniciar o agente em Full Auto ou Supervisionado →
+    </p>
+  </div>
 </div>
 {% else %}
 <div class="card">
-  <h3>Sessão <span class="mono">{{ sess.id[:8] }}</span>
-    <span class="badge {{ sess.state|badge_for }}">{{ sess.state }}</span></h3>
+  <h3 style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem; flex-wrap:wrap;">
+    <span>Sessão <span class="mono">#{{ sess.id[:8] }}</span></span>
+    <span class="badge {{ sess.state|badge_for }}" data-state="{{ sess.state }}">
+      {% if sess.state == "running" %}<span class="koth-dot-pulse"></span>{% endif %}
+      {{ sess.state|state_label }}
+    </span>
+  </h3>
+  {% if sess.state == "running" and sess.live_events %}
+  <div class="koth-alert warn live-activity" style="margin-bottom:0.85rem; flex-direction:column; gap:0.35rem;">
+    <strong style="font-size:0.78rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--warning);">
+      Atividade ao vivo
+    </strong>
+    <ul style="margin:0; padding-left:1.1rem; font-size:0.78rem;" class="mono">
+      {% for ev in sess.live_events[-6:]|reverse %}
+      <li><span style="color:var(--muted);">[{{ ev.ts }}]</span> <strong>{{ ev.kind }}</strong>: {{ ev.detail }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if sess.pending_decision %}
+  <div class="koth-alert warn" style="margin-bottom:0.85rem;">
+    <div>
+      <strong style="font-size:0.78rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--warning);">
+        Próxima ação (Júri): {{ sess.pending_decision.action }}
+      </strong>
+      <p class="mono" style="margin:0.2rem 0 0; font-size:0.83rem;">{{ sess.pending_decision.reason }}</p>
+    </div>
+  </div>
+  {% endif %}
   {% if sess.findings %}
   <div class="findings">
-    <h4>Findings acumulados</h4>
+    <h4>Achados acumulados</h4>
     <ul>{% for f in sess.findings %}<li class="mono">{{ f }}</li>{% endfor %}</ul>
   </div>
   {% endif %}
+  {% if sess.blackboard and (sess.blackboard.dead_ends or sess.blackboard.active_hypotheses or sess.blackboard.discovered_targets) %}
+  <div class="findings">
+    <h4>Blackboard (Memória Estruturada)</h4>
+    {% if sess.blackboard.discovered_targets %}
+    <p class="mono" style="font-size:0.8rem; margin-bottom:0.25rem;">targets descobertos:</p>
+    <ul style="margin-bottom:0.45rem;">
+      {% for t in sess.blackboard.discovered_targets %}
+      <li class="mono" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem; margin-bottom:0.2rem;">
+        <span>{{ t }}</span>
+        {% if t in (sess.blackboard.approved_targets or []) %}
+          <span class="badge flag-ok mono">aprovado no guard</span>
+        {% else %}
+          <button type="button" class="btn ghost btn-xs"
+                  hx-post="/challenges/{{ sess.challenge_id }}/agent/sessions/{{ sess.id }}/approve-target"
+                  hx-vals='{"target": {{ t|tojson }}}'
+                  hx-target="#agent-feed"
+                  hx-swap="innerHTML">Liberar no guard</button>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if sess.blackboard.dead_ends %}
+    <p class="mono" style="font-size:0.8rem; color: var(--muted);">caminhos descartados (evitar repetir):</p>
+    <ul>{% for d in sess.blackboard.dead_ends %}<li class="mono" style="color: var(--muted);">{{ d }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if sess.blackboard.active_hypotheses %}
+    <p class="mono" style="font-size:0.8rem;">hipóteses ativas:</p>
+    <ul>{% for h in sess.blackboard.active_hypotheses %}<li class="mono">{{ h }}</li>{% endfor %}</ul>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if sess.telemetry %}
+  <details style="margin:0.6rem 0;">
+    <summary class="mono" style="cursor:pointer; color:var(--muted); font-size:0.82rem;">
+      Telemetria de execução ({{ sess.telemetry|length }} ciclo(s)){% if sess.estimated_cost_usd %} · custo est. ${{ '%.4f'|format(sess.estimated_cost_usd) }}{% endif %}
+    </summary>
+    <table class="list" style="font-size:0.78rem; margin-top:0.4rem;">
+      <tr><th>Ciclo</th><th>Cat</th><th>Modelo</th><th>In/Out Tokens</th><th>Dur</th><th>Tools/MCP/Cache</th><th>Custo</th></tr>
+      {% for t in sess.telemetry %}
+      <tr>
+        <td class="mono">{{ t.cycle }} ({{ t.status }})</td>
+        <td class="mono">{{ t.category }}</td>
+        <td class="mono">{{ t.model }}</td>
+        <td class="mono tabular">{{ t.input_tokens }}/{{ t.output_tokens }}</td>
+        <td class="mono tabular">{{ t.duration_s }}s</td>
+        <td class="mono tabular">{{ t.tool_calls }}/{{ t.mcp_calls }}/{{ t.cache_hits }}</td>
+        <td class="mono tabular">${{ '%.4f'|format(t.cost_usd or 0) }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </details>
+  {% endif %}
   {% if sess.final_report %}
   <div class="findings">
-    <h4>Relatório Final (OP) — {{ sess.final_report.status }}</h4>
+    <h4>Relatório Final (OP) — {{ sess.final_report.status|state_label }}</h4>
     {% if sess.final_report.flag_candidate %}
-    <p class="mono" style="color: var(--flag-ok);">flag: {{ sess.final_report.flag_candidate }}</p>
+    <div style="display:flex; flex-wrap:wrap; align-items:center; gap:0.45rem; margin:0.35rem 0;">
+      <code class="mono koth-copy-pill" style="color:var(--flag-ok); border-color:var(--flag-ok);">{{ sess.final_report.flag_candidate }}</code>
+      <button type="button" class="btn success btn-xs" onclick="kothCopy('{{ sess.final_report.flag_candidate|e }}', this)">Copiar flag</button>
+    </div>
     {% endif %}
     <ul>{% for item in sess.final_report.attempts_summary %}<li class="mono">{{ item }}</li>{% endfor %}</ul>
     <div class="row-actions" style="margin-top:0.6rem; align-items:center;">
@@ -36,22 +124,34 @@
     {% endif %}
   </div>
   {% endif %}
-  {% if sess.pending_decision %}
-  <p class="mono" style="color: var(--warning);">
-    próximo passo (júri): {{ sess.pending_decision.action }} — {{ sess.pending_decision.reason }}
-  </p>
-  {% endif %}
-  {% for rep in sess.reports %}
-  <div class="cycle">
-    <h4>Ciclo {{ loop.index }} — especialista</h4>
-    <p class="mono" style="color: var(--accent);">
-      status: {{ rep.status }}{% if rep.tools_used %} · tools: {{ rep.tools_used|join(", ") }}{% endif %}
-    </p>
-    {% if rep.findings %}
-    <ul>{% for f in rep.findings %}<li class="mono">{{ f }}</li>{% endfor %}</ul>
-    {% endif %}
-    {% if rep.next_step %}<p class="mono">next: {{ rep.next_step }}</p>{% endif %}
+
+  {% if sess.reports %}
+  <div class="koth-timeline">
+    {% for rep in sess.reports %}
+    {% set node_cls = "ok" if rep.status == "SOLVED" else ("warn" if rep.status == "NEED_HINT" else "err") %}
+    {% set is_last = loop.last %}
+    <div class="koth-tl-item">
+      <span class="koth-tl-node {{ node_cls }}"></span>
+      <details {% if is_last %}open{% endif %}>
+        <summary style="cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:0.5rem; list-style:none;">
+          <span style="font-weight:600; font-size:0.88rem;">
+            Ciclo {{ loop.index }} — especialista
+            {% if rep.tools_used %}<small class="mono" style="color:var(--muted); font-weight:400;">· {{ rep.tools_used|join(", ") }}</small>{% endif %}
+          </span>
+          <span class="badge {{ 'flag-ok' if rep.status == 'SOLVED' else ('warn' if rep.status == 'NEED_HINT' else 'err') }} mono">
+            {{ rep.status|report_status_label }}
+          </span>
+        </summary>
+        <div class="cycle" style="margin-top:0.45rem;">
+          {% if rep.findings %}
+          <ul>{% for f in rep.findings %}<li class="mono">{{ f }}</li>{% endfor %}</ul>
+          {% endif %}
+          {% if rep.next_step %}<p class="mono" style="color:var(--muted); font-size:0.82rem;">próximo: {{ rep.next_step }}</p>{% endif %}
+        </div>
+      </details>
+    </div>
+    {% endfor %}
   </div>
-  {% endfor %}
+  {% endif %}
 </div>
 {% endif %}

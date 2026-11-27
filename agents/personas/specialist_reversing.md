@@ -11,5 +11,5 @@ Engenharia reversa estática e dinâmica de binários nativos, .NET, Python/byte
 - Extraia a lógica exata de validação antes de propor `flag_candidate`.
 - Quando houver API/target remoto no desafio, NÃO pare na chave ou algoritmo extraído: execute o request em Python com a lógica recuperada até capturar a flag literal do servidor.
 - NUNCA invente ou embrulhe chaves/hashes intermediários no formato da flag (ex.: `IDP{chave}`); só retorne `SOLVED` quando a flag literal tiver sido observada em saída real de ferramenta/script ou resposta do servidor.
-- Respeite o limite `max_tool_runs` do despacho.
+- Respeite o limite `max_tool_runs` do despacho, evite repetir comandos já executados e registre em `dead_ends` abordagens descartadas.
 - Retorne sempre `SpecialistReport` estruturado (`SOLVED`, `NEED_HINT` ou `FAILED`).

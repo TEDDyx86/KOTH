@@ -1,0 +1,50 @@
+<div style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:0.5rem; margin-bottom:0.65rem;">
+  <span class="mono" style="font-size:0.8rem; color:var(--muted);">
+    {{ files|length }} arquivo(s) em <code class="koth-copy-pill">/work</code>
+  </span>
+  <div class="row-actions" style="align-items:center;">
+    <button type="button" class="btn ghost btn-xs"
+            hx-get="/challenges/{{ challenge_id }}/agent/sandbox"
+            hx-target="#agent-sandbox-box"
+            hx-swap="innerHTML">Atualizar</button>
+  </div>
+</div>
+
+{% if files %}
+<div class="table-scroll" style="margin-bottom:0.75rem;">
+  <table class="list" style="font-size:0.8rem;">
+    <tr><th>Arquivo</th><th>Tamanho</th><th style="text-align:right;">Ações</th></tr>
+    {% for f in files %}
+    <tr>
+      <td class="mono">{{ f.rel }}</td>
+      <td class="mono tabular" style="color:var(--muted);">{{ f.size }} B</td>
+      <td style="text-align:right; white-space:nowrap;">
+        <button type="button" class="btn ghost btn-xs"
+                hx-get="/challenges/{{ challenge_id }}/agent/sandbox/view?path={{ f.rel|urlencode }}"
+                hx-target="#sandbox-preview-box"
+                hx-swap="innerHTML">Visualizar</button>
+        <a class="btn ghost btn-xs" href="/challenges/{{ challenge_id }}/agent/sandbox/download?path={{ f.rel|urlencode }}">Baixar</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% else %}
+<div class="koth-empty" style="margin-bottom:0.75rem;">
+  <strong>Diretório /work vazio</strong>
+  <p style="color:var(--muted); margin:0.2rem 0 0; font-size:0.8rem;">
+    Scripts gerados pela IA, outputs MCP e anexos aparecerão aqui.
+  </p>
+</div>
+{% endif %}
+
+<div id="sandbox-preview-box" style="margin-bottom:0.75rem;"></div>
+
+<form hx-post="/challenges/{{ challenge_id }}/agent/sandbox/upload"
+      hx-target="#agent-sandbox-box"
+      hx-swap="innerHTML"
+      hx-encoding="multipart/form-data"
+      style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
+  <input type="file" name="files" multiple required style="width:auto; flex:1 1 200px;">
+  <button class="btn ghost btn-sm" type="submit">Enviar para /work</button>
+</form>

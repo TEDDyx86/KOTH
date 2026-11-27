@@ -81,7 +81,7 @@
       {% endif %}
 
       <div class="koth-sidebar-footer">
-        <span><span class="koth-dot"></span>OP ativo</span>
+        <span><span class="koth-dot koth-dot-pulse"></span>OP ativo</span>
         <span class="mono">KOTH // v1</span>
       </div>
     </aside>
@@ -90,5 +90,162 @@
       {% block content %}{% endblock %}
     </main>
   </div>
+
+  <div id="koth-toast-container" class="koth-toast-container" aria-live="polite"></div>
+
+  <div id="koth-confirm-modal" class="koth-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="koth-confirm-title" hidden>
+    <div class="koth-modal">
+      <h3 id="koth-confirm-title">Confirmar ação</h3>
+      <p id="koth-confirm-msg"></p>
+      <div class="koth-modal-actions">
+        <button type="button" class="btn ghost btn-sm" id="koth-confirm-cancel">Cancelar</button>
+        <button type="button" class="btn btn-sm" id="koth-confirm-ok">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    window.kothToast = function (kind, title, msg) {
+      var box = document.getElementById('koth-toast-container');
+      if (!box) return;
+      var el = document.createElement('div');
+      el.className = 'koth-toast ' + (kind || 'info');
+      var head = document.createElement('div');
+      head.className = 'koth-toast-head';
+      var t = document.createElement('strong');
+      t.textContent = title || 'Aviso';
+      var closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'koth-toast-close';
+      closeBtn.setAttribute('aria-label', 'Fechar');
+      closeBtn.textContent = '✕';
+      closeBtn.onclick = function () { el.remove(); };
+      head.appendChild(t);
+      head.appendChild(closeBtn);
+      el.appendChild(head);
+      if (msg) {
+        var body = document.createElement('div');
+        body.className = 'koth-toast-body';
+        body.textContent = msg;
+        el.appendChild(body);
+      }
+      var track = document.createElement('div');
+      track.className = 'koth-toast-track';
+      var bar = document.createElement('div');
+      bar.className = 'koth-toast-bar';
+      track.appendChild(bar);
+      el.appendChild(track);
+      box.appendChild(el);
+      requestAnimationFrame(function () { bar.style.width = '0%'; });
+      setTimeout(function () { if (el.parentNode) el.remove(); }, 4200);
+    };
+
+    window.kothCopy = function (text, btn) {
+      if (!text) return;
+      var done = function () {
+        if (btn) {
+          var prev = btn.textContent;
+          btn.textContent = 'Copiado!';
+          setTimeout(function () { btn.textContent = prev; }, 1400);
+        }
+        window.kothToast('ok', 'Copiado', text.length > 60 ? text.slice(0, 60) + '…' : text);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(done);
+      } else {
+        done();
+      }
+    };
+
+    window.kothParseError = function (xhr) {
+      var status = xhr ? xhr.status : 0;
+      var raw = (xhr && xhr.responseText) ? xhr.responseText : '';
+      var detail = '';
+      try {
+        var parsed = JSON.parse(raw);
+        if (parsed && parsed.detail) { detail = String(parsed.detail); }
+      } catch (_e) {
+        detail = raw.replace(/<[^>]+>/g, ' ').trim().slice(0, 180);
+      }
+      var low = detail.toLowerCase();
+      if (status === 409 && low.indexOf('already active') !== -1) {
+        return 'Já existe uma sessão ativa para este desafio. Aguarde ou interrompa a execução atual.';
+      }
+      if (status === 409 && low.indexOf('already solved') !== -1) {
+        return 'Este desafio já está marcado como resolvido.';
+      }
+      if (status === 409 && low.indexOf('not awaiting approval') !== -1) {
+        return 'Esta sessão não está aguardando aprovação no momento.';
+      }
+      if (status === 503) {
+        return 'Runtime de IA indisponível. Verifique provedores e chaves em Configurações.';
+      }
+      if (status === 404) {
+        return 'Sessão ou desafio não encontrado.';
+      }
+      return detail ? ('Erro ' + status + ': ' + detail) : ('Erro HTTP ' + status);
+    };
+
+    var _pendingConfirm = null;
+    window.kothConfirm = function (message, onConfirm) {
+      var modal = document.getElementById('koth-confirm-modal');
+      var msgEl = document.getElementById('koth-confirm-msg');
+      if (!modal || !msgEl) {
+        if (window.confirm(message)) onConfirm();
+        return;
+      }
+      msgEl.textContent = message || 'Deseja continuar?';
+      _pendingConfirm = onConfirm;
+      modal.hidden = false;
+      modal.classList.add('open');
+      var okBtn = document.getElementById('koth-confirm-ok');
+      if (okBtn) okBtn.focus();
+    };
+
+    window.kothConfirmForm = function (form, message) {
+      if (form.dataset.kothConfirmed === '1') {
+        form.dataset.kothConfirmed = '';
+        return true;
+      }
+      window.kothConfirm(message, function () {
+        form.dataset.kothConfirmed = '1';
+        if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
+      });
+      return false;
+    };
+
+    var cancelBtn = document.getElementById('koth-confirm-cancel');
+    var okBtn = document.getElementById('koth-confirm-ok');
+    var backdrop = document.getElementById('koth-confirm-modal');
+    function closeConfirm() {
+      if (!backdrop) return;
+      backdrop.hidden = true;
+      backdrop.classList.remove('open');
+      _pendingConfirm = null;
+    }
+    if (cancelBtn) cancelBtn.onclick = closeConfirm;
+    if (okBtn) okBtn.onclick = function () {
+      var fn = _pendingConfirm;
+      closeConfirm();
+      if (typeof fn === 'function') fn();
+    };
+    if (backdrop) {
+      backdrop.addEventListener('click', function (e) {
+        if (e.target === backdrop) closeConfirm();
+      });
+    }
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && backdrop && !backdrop.hidden) closeConfirm();
+    });
+    document.body.addEventListener('htmx:confirm', function (evt) {
+      if (!evt.detail || !evt.detail.question) return;
+      evt.preventDefault();
+      window.kothConfirm(evt.detail.question, function () {
+        evt.detail.issueRequest(true);
+      });
+    });
+  })();
+  </script>
 </body>
 </html>

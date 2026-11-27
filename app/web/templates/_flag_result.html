@@ -1,7 +1,16 @@
 {% if result.accepted %}
-<p class="mono" style="color: var(--flag-ok);">
-  ✔ {{ flag }} — validada; registre manualmente na plataforma
-</p>
+<div class="koth-alert ok" style="margin-top:0.55rem;">
+  <div style="min-width:0; flex:1;">
+    <div style="font-weight:600; color:#56d364;">✔ Flag validada</div>
+    <div style="margin-top:0.35rem; display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem;">
+      <code class="mono koth-copy-pill">{{ flag }}</code>
+      <span style="font-size:0.78rem; color:var(--muted);">Registre manualmente na plataforma</span>
+    </div>
+  </div>
+  <button type="button" class="btn success btn-xs" onclick="kothCopy('{{ flag|e }}', this)">Copiar</button>
+</div>
 {% else %}
-<p class="mono" style="color: var(--error);">✖ {{ result.reason }}</p>
+<div class="koth-alert err" style="margin-top:0.55rem;">
+  <span class="mono" style="color: var(--error);">✖ {{ result.reason }}</span>
+</div>
 {% endif %}

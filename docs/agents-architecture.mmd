@@ -1,0 +1,137 @@
+flowchart TD
+    %% Estilos
+    classDef orquestrador fill:#e1f5fe,stroke:#01579b,stroke-width:3px
+    classDef planejador fill:#fff8e1,stroke:#f9a825,stroke-width:3px
+    classDef juri fill:#fff3e0,stroke:#e65100,stroke-width:3px
+    classDef especializado fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef multimodal fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef submission fill:#ffebee,stroke:#b71c1c,stroke-width:3px
+    classDef persistencia fill:#e8eaf6,stroke:#303f9f,stroke-width:3px
+    classDef sandbox fill:#eceff1,stroke:#37474f,stroke-width:2px,stroke-dasharray: 5 5
+    classDef externo fill:#f1f8e9,stroke:#33691e,stroke-width:2px,stroke-dasharray: 5 5
+    classDef banco fill:#f1f8e9,stroke:#33691e,stroke-width:2px,stroke-dasharray: 5 5
+    classDef apiExterna fill:#ffecb3,stroke:#ff6f00,stroke-width:2px,stroke-dasharray: 5 5
+
+    %% Entrada
+    Usuario((Usuário / Cliente)):::externo
+    Challenge[Desafio CTF<br/>event_id, categoria, pontos, dificuldade]:::externo
+    DB[(Banco SQLite<br/>Challenge, Attempt, Note, Attachment)]:::banco
+
+    %% Orquestrador
+    OP[Orquestrador Principal<br/>Recebe pedido<br/>Coordena fluxo<br/>Resposta final ao usuário]:::orquestrador
+
+    %% Planner
+    PL[Planner / Estrategista<br/>Prioriza por pontos/dificuldade<br/>Critério de parada / desistência<br/>Consulta Memory Store]:::planejador
+
+    %% Reconhecimento
+    RC[Reconhecimento<br/>Port scan, strings, file type<br/>Identifica superfície inicial<br/>Salva artefatos iniciais no PE]:::especializado
+
+    %% Júri
+    JU[Subagent Júri<br/>Analisa recon e categoriza<br/>Roteia para especialista<br/>Grava cada Attempt no PE<br/>Coordena tática]:::juri
+
+    %% Especialistas (6 agora com Forensics e OSINT)
+    S1[Subagent Web<br/>Payload: SOLVED/NEED_HINT/FAILED]:::especializado
+    S2[Subagent Pwn<br/>Payload: SOLVED/NEED_HINT/FAILED]:::especializado
+    S3[Subagent Crypto<br/>Payload: SOLVED/NEED_HINT/FAILED]:::especializado
+    S4[Subagent Reversing<br/>Payload: SOLVED/NEED_HINT/FAILED]:::especializado
+    S5[Subagent Forensics/Stego<br/>OCR, visão, esteganografia<br/>Payload: SOLVED/NEED_HINT/FAILED]:::multimodal
+    S6[Subagent OSINT<br/>Buscas abertas, geolocalização<br/>Payload: SOLVED/NEED_HINT/FAILED]:::especializado
+
+    %% Sandbox / Tool Executor
+    SB[Sandbox / Tool Executor<br/>Docker / Kali<br/>nmap, ghidra, pwntools, sqlmap, python<br/>Isolado do orquestrador]:::sandbox
+
+    %% Persistência / Memory Store
+    PE[Persistência / Memory Store<br/>Centraliza TODAS leituras e escritas<br/>PE <--> DB (SQL Read/Write)<br/>Attempt, Note, Attachment]:::persistencia
+
+    %% Submission com validador de flag (único responsável pelo regex)
+    SU[Subagent Submission<br/>Valida regex da flag (CTF{...})<br/>Checa duplicidade no PE<br/>Submete flag na API externa<br/>Grava resultado no PE]:::submission
+
+    %% API Externa do CTF (representa submissão externa)
+    CTF[Plataforma CTF<br/>API externa<br/>Submissão de flag]:::apiExterna
+
+    %% Fluxo principal
+    Usuario -->|Envia desafio| OP
+    Challenge --> OP
+    OP -->|Coordena| PL
+    PL <-->|Consulta priorização / abortar| PE
+    PL -->|Ordena ataque| RC
+    RC <-->|Executa ferramentas| SB
+    RC -->|Salva artefatos iniciais| PE
+    RC -->|Recon inicial| JU
+
+    %% Júri → Especialistas (apenas 1 seta de ida por especialista)
+    JU -->|Tarefa / Dica| S1
+    JU -->|Tarefa / Dica| S2
+    JU -->|Tarefa / Dica| S3
+    JU -->|Tarefa / Dica| S4
+    JU -->|Tarefa / Dica| S5
+    JU -->|Tarefa / Dica| S6
+
+    %% Especialistas → Júri (apenas 1 seta de volta por especialista, payload estruturado)
+    S1 -->|Retorno: status/logs/flag| JU
+    S2 -->|Retorno: status/logs/flag| JU
+    S3 -->|Retorno: status/logs/flag| JU
+    S4 -->|Retorno: status/logs/flag| JU
+    S5 -->|Retorno: status/logs/flag| JU
+    S6 -->|Retorno: status/logs/flag| JU
+
+    %% Especialistas ↔ Sandbox
+    S1 <-->|Executa| SB
+    S2 <-->|Executa| SB
+    S3 <-->|Executa| SB
+    S4 <-->|Executa| SB
+    S5 <-->|Executa| SB
+    S6 <-->|Executa| SB
+
+    %% Júri grava Attempt no PE
+    JU -->|Grava Attempt| PE
+
+    %% Persistência ↔ Banco SQLite (único ponto de gravação no DB)
+    PE <-->|SQL Read/Write| DB
+
+    %% Júri → Submission (SU é o único responsável por validação de regex)
+    JU -->|Flag encontrada?| SU
+    SU <-->|Valida regex + duplicidade| PE
+    SU -->|Submete flag na API| CTF
+
+    %% Fluxo de desistência
+    JU -->|Não resolveu?| PL
+    PL -->|Reavaliar estratégia| RC
+    PL -->|Desistir / Timeout| OP
+
+    %% Resposta final
+    CTF -->|Confirma acerto| SU
+    SU -->|Resultado| JU
+    JU -->|Resposta consolidada| OP
+    OP -->|Resposta final| Usuario
+
+    %% Estilos dos links
+    linkStyle default stroke-width:2px,fill:none,stroke:#607d8b
+    linkStyle 0 stroke:#01579b,stroke-width:3px
+    linkStyle 1 stroke:#01579b,stroke-width:3px
+    linkStyle 2 stroke:#f9a825,stroke-width:3px
+    linkStyle 3 stroke:#303f9f,stroke-width:3px
+    linkStyle 4 stroke:#f9a825,stroke-width:3px
+    linkStyle 5 stroke:#1b5e20,stroke-width:3px
+    linkStyle 6 stroke:#1b5e20,stroke-width:3px
+    linkStyle 7 stroke:#1b5e20,stroke-width:3px
+    linkStyle 8 stroke:#1b5e20,stroke-width:3px
+    linkStyle 9 stroke:#1b5e20,stroke-width:3px
+    linkStyle 10 stroke:#1b5e20,stroke-width:3px
+    linkStyle 11 stroke:#1b5e20,stroke-width:3px
+    linkStyle 12 stroke:#1b5e20,stroke-width:3px
+    linkStyle 13 stroke:#1b5e20,stroke-width:3px
+    linkStyle 14 stroke:#1b5e20,stroke-width:3px
+    linkStyle 15 stroke:#1b5e20,stroke-width:3px
+    linkStyle 16 stroke:#1b5e20,stroke-width:3px
+    linkStyle 17 stroke:#1b5e20,stroke-width:3px
+    linkStyle 18 stroke:#1b5e20,stroke-width:3px
+    linkStyle 19 stroke:#1b5e20,stroke-width:3px
+    linkStyle 20 stroke:#1b5e20,stroke-width:3px
+    linkStyle 21 stroke:#303f9f,stroke-width:3px
+    linkStyle 22 stroke:#303f9f,stroke-width:3px
+    linkStyle 23 stroke:#ff6f00,stroke-width:3px
+    linkStyle 24 stroke:#01579b,stroke-width:3px
+    linkStyle 25 stroke:#01579b,stroke-width:3px
+    linkStyle 26 stroke:#ff6f00,stroke-width:3px
+    linkStyle 27 stroke:#ff6f00,stroke-width:3px

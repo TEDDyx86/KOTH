@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from sqlalchemy import text
@@ -7,6 +8,29 @@ from ..config import BASE_DIR
 from .parse import parse_knowledge_dir
 
 DEFAULT_KNOWLEDGE_ROOT = BASE_DIR / "knowledge"
+
+_STOPWORDS = frozenset({
+    "and", "or", "not", "the", "for", "with", "from", "that", "this", "into",
+    "onto", "via", "use", "using", "check", "test", "find", "get", "set",
+    "para", "com", "sem", "uma", "uns", "umas", "das", "dos", "que", "por",
+    "como", "sobre", "entre", "mais", "menos", "usar", "testar",
+})
+
+
+def _build_fts_query(query: str) -> str:
+    """Tokenize free-form task/query text into a safe FTS5 OR query ranked by bm25."""
+    tokens = re.findall(r"[A-Za-z0-9_]+", query or "")
+    seen: set[str] = set()
+    kept: list[str] = []
+    for tok in tokens:
+        low = tok.lower()
+        if len(low) < 2 or low in _STOPWORDS or low in seen:
+            continue
+        seen.add(low)
+        kept.append(f'"{tok}"')
+        if len(kept) >= 12:
+            break
+    return " OR ".join(kept)
 
 
 class KnowledgeIndex:
@@ -45,20 +69,26 @@ class KnowledgeIndex:
             return []
         if self.count() == 0 and Path(self.knowledge_root).exists():
             self.rebuild()
-        params: dict = {"q": query, "limit": limit}
         cat_clause = ""
+        params: dict = {"limit": limit}
         if category:
             cat_clause = "AND category = :cat"
             params["cat"] = category
-        sql = text(
-            "SELECT source, category, title, path, "
-            "snippet(knowledge_fts, 4, '[[', ']]', '…', 16) AS snip "
-            "FROM knowledge_fts WHERE knowledge_fts MATCH :q "
-            f"{cat_clause} ORDER BY bm25(knowledge_fts) LIMIT :limit"
-        )
-        try:
-            rows = self.session.execute(sql, params).all()
-        except Exception:
+
+        fts_q = _build_fts_query(query)
+        rows = None
+        if fts_q:
+            sql = text(
+                "SELECT source, category, title, path, "
+                "snippet(knowledge_fts, 4, '[[', ']]', '…', 16) AS snip "
+                "FROM knowledge_fts WHERE knowledge_fts MATCH :q "
+                f"{cat_clause} ORDER BY bm25(knowledge_fts) LIMIT :limit"
+            )
+            try:
+                rows = self.session.execute(sql, {**params, "q": fts_q}).all()
+            except Exception:
+                rows = None
+        if rows is None:
             sql = text(
                 "SELECT source, category, title, path, "
                 "substr(body, 1, 160) AS snip "

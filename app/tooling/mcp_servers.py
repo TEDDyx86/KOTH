@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,6 +11,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 import yaml
+from pydantic_ai import ModelRetry
+from pydantic_ai.toolsets import WrapperToolset
 
 from ..config import BASE_DIR
 
@@ -176,6 +179,83 @@ def mcp_status_rows(path: Path | None = None) -> list[dict[str, Any]]:
     return rows
 
 
+@dataclass
+class BoundedMcpToolset(WrapperToolset):
+    """Wraps an MCPToolset to enforce per-dispatch call budgets and cap oversized outputs."""
+    max_output_chars: int = 8000
+    default_max_calls: int = 16
+
+    async def call_tool(self, name: str, tool_args: dict[str, Any], ctx: Any, tool: Any) -> Any:
+        deps = getattr(ctx, "deps", None)
+        if deps is not None and hasattr(deps, "mcp_calls"):
+            order = getattr(deps, "order", None)
+            budget = max(int(getattr(order, "max_tool_runs", 8) or 8) * 2, self.default_max_calls)
+            lock = getattr(deps, "lock", None)
+            if lock is not None:
+                with lock:
+                    if deps.mcp_calls >= budget:
+                        raise ModelRetry(
+                            f"MCP call budget ({budget}) reached — stop calling MCP tools and return SpecialistReport now."
+                        )
+                    deps.mcp_calls += 1
+                    call_idx = deps.mcp_calls
+            else:
+                if deps.mcp_calls >= budget:
+                    raise ModelRetry(
+                        f"MCP call budget ({budget}) reached — stop calling MCP tools and return SpecialistReport now."
+                    )
+                deps.mcp_calls += 1
+                call_idx = deps.mcp_calls
+        else:
+            call_idx = 0
+
+        on_event = getattr(deps, "on_event", None) if deps is not None else None
+        if callable(on_event):
+            try:
+                on_event("mcp", f"{name}")
+            except Exception:
+                pass
+        result = await super().call_tool(name, tool_args, ctx, tool)
+        return self._truncate_output(name, result, deps, call_idx)
+
+    def _truncate_output(self, tool_name: str, result: Any, deps: Any, call_idx: int) -> Any:
+        if isinstance(result, str):
+            text = result
+        elif isinstance(result, (dict, list)):
+            try:
+                text = json.dumps(result, ensure_ascii=False)
+            except Exception:
+                return result
+        else:
+            return result
+
+        if len(text) <= self.max_output_chars:
+            return result
+
+        saved_rel: str | None = None
+        runner = getattr(deps, "runner", None) if deps is not None else None
+        challenge = getattr(deps, "challenge", None) if deps is not None else None
+        if runner is not None and challenge is not None and hasattr(runner, "sandbox_workdir"):
+            try:
+                workdir = runner.sandbox_workdir(challenge)
+                safe_name = re.sub(r"[^a-zA-Z0-9_.-]+", "_", tool_name).strip("_") or "mcp"
+                out_dir = workdir / "mcp_outputs"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                out_path = out_dir / f"{safe_name}_{call_idx}.txt"
+                out_path.write_text(text, encoding="utf-8")
+                saved_rel = f"mcp_outputs/{out_path.name}"
+            except Exception:
+                saved_rel = None
+
+        head = text[: self.max_output_chars]
+        hint = (
+            f"Full output ({len(text)} chars) saved to '{saved_rel}' — use read_sandbox_file to inspect slices."
+            if saved_rel
+            else f"Truncated from {len(text)} chars to save token budget."
+        )
+        return f"{head}\n\n...[MCP output truncated: {hint}]"
+
+
 def _make_toolset(spec: McpServerSpec):
     from pydantic_ai.mcp import MCPToolset, SSETransport, StdioTransport, StreamableHttpTransport
 
@@ -184,7 +264,7 @@ def _make_toolset(spec: McpServerSpec):
             return None
         merged_env = {**os.environ, **spec.env} if spec.env else None
         transport = StdioTransport(command=spec.command, args=list(spec.args), env=merged_env)
-        return MCPToolset(transport, id=spec.name).prefixed(spec.name)
+        return BoundedMcpToolset(MCPToolset(transport, id=spec.name).prefixed(spec.name))
 
     if not spec.url:
         return None
@@ -192,7 +272,7 @@ def _make_toolset(spec: McpServerSpec):
         transport = SSETransport(url=spec.url, headers=spec.headers or None)
     else:
         transport = StreamableHttpTransport(url=spec.url, headers=spec.headers or None)
-    return MCPToolset(transport, id=spec.name).prefixed(spec.name)
+    return BoundedMcpToolset(MCPToolset(transport, id=spec.name).prefixed(spec.name))
 
 
 def build_pydantic_toolsets(category: str | None = None, path: Path | None = None) -> list[Any]:
@@ -219,7 +299,9 @@ async def _probe_async(spec: McpServerSpec, timeout_s: float = 20.0) -> tuple[bo
     if ts is None:
         hint = f"comando '{spec.command}' não encontrado no PATH" if spec.transport == "stdio" else "URL inválida"
         return False, hint
-    inner = getattr(ts, "wrapped", ts)
+    inner = ts
+    while hasattr(inner, "wrapped"):
+        inner = inner.wrapped
     try:
         async def _check():
             async with ts:

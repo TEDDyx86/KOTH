@@ -4,7 +4,7 @@ import re
 import pytest
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.agents.jury import JuryAgent
 from app.agents.orchestrator import Orchestrator
@@ -97,7 +97,7 @@ def test_reject_records_feedback_and_redispatches(env):
     s0 = orch.start(session, ch.id)
     s1 = orch.reject(session, s0.id, "try harder on the pcap")
     assert s1.state == "awaiting_approval"
-    notes = session.query(Note).filter(Note.challenge_id == ch.id).all()
+    notes = list(session.exec(select(Note).where(Note.challenge_id == ch.id)).all())
     assert any("try harder on the pcap" in n.content for n in notes)
 
 

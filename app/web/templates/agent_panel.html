@@ -1,35 +1,83 @@
 {% extends "base.html" %}
 {% block title %}Agente — {{ challenge.title }} — KOTH{% endblock %}
 {% block content %}
-<h1>Painel do Agente
-  <span class="mono" style="color: var(--muted); font-size: 0.9rem;">{{ challenge.title }}</span>
-</h1>
-<p><a href="/challenges/{{ challenge.id }}">← voltar ao challenge</a></p>
+<header class="agent-header-bar card">
+  <div class="agent-header-main">
+    <div class="agent-breadcrumb">
+      <a href="/challenges/{{ challenge.id }}" class="mono">← voltar ao challenge</a>
+      <span style="color:var(--muted);">/</span>
+      <span class="badge">{{ challenge.category }}</span>
+      <span class="badge neutral mono tabular">{{ challenge.points }} pts</span>
+    </div>
+    <h1 style="margin:0.25rem 0 0;">Painel do Agente
+      <span class="mono" style="color: var(--muted); font-size: 0.92rem;">— {{ challenge.title }}</span>
+    </h1>
+    {% if challenge.target %}
+    <div class="agent-target-row">
+      <span class="mono" style="color:var(--muted); font-size:0.82rem;">target:</span>
+      <code class="mono koth-copy-pill">{{ challenge.target }}</code>
+      <button type="button" class="btn ghost btn-xs" onclick="kothCopy('{{ challenge.target|e }}', this)">Copiar</button>
+    </div>
+    {% endif %}
+  </div>
+  {% if session_history and session_history|length > 1 %}
+  <div style="display:flex; align-items:center; gap:0.45rem;">
+    <label class="mono" style="font-size:0.78rem; color:var(--muted); white-space:nowrap;">Sessão:</label>
+    <select class="mono" style="width:auto; font-size:0.8rem; padding:0.3rem 0.55rem;"
+            onchange="window.location.href='/challenges/{{ challenge.id }}/agent' + (this.value ? ('?session_id=' + encodeURIComponent(this.value)) : '')">
+      {% for hs in session_history %}
+        {% set is_sel = (selected_session_id == hs.id) or (not selected_session_id and loop.first) %}
+        <option value="{{ '' if loop.first else hs.id }}" {% if is_sel %}selected{% endif %}>
+          #{{ hs.id[:8] }} · {{ hs.state|state_label }} ({{ hs.dispatch_count }} ciclos){% if loop.first %} [atual]{% endif %}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+</header>
+{% set sid_qs = ('?session_id=' ~ selected_session_id) if selected_session_id else '' %}
 <div class="agent-grid">
-  <section id="agent-feed"
-           hx-get="/challenges/{{ challenge.id }}/agent/feed"
-           hx-trigger="every 1.5s" hx-swap="innerHTML">
-    {% include "_agent_feed.html" %}
-  </section>
+  <div>
+    <section id="agent-feed"
+             hx-get="/challenges/{{ challenge.id }}/agent/feed{{ sid_qs }}"
+             hx-trigger="every 1.5s" hx-swap="innerHTML">
+      {% include "_agent_feed.html" %}
+    </section>
+    <details class="card" style="margin-top:0.25rem;">
+      <summary class="mono" style="cursor:pointer; font-weight:600; font-size:0.88rem;">
+        Arquivos do Sandbox (/work)
+      </summary>
+      <div id="agent-sandbox-box" style="margin-top:0.75rem;">
+        {% with challenge_id = challenge.id, files = sandbox_files %}{% include "_agent_sandbox.html" %}{% endwith %}
+      </div>
+    </details>
+  </div>
   <aside class="agent-side">
     <div id="agent-side"
-         hx-get="/challenges/{{ challenge.id }}/agent/side"
-         hx-trigger="every 1.5s [!document.querySelector('#agent-side .checkpoint') && (!document.activeElement || !document.activeElement.closest('#agent-side'))]"
+         hx-get="/challenges/{{ challenge.id }}/agent/side{{ sid_qs }}"
+         hx-trigger="every 1.5s [!document.querySelector('#agent-side .checkpoint') && !document.querySelector('#agent-side .resume-panel') && (!document.activeElement || !document.activeElement.closest('#agent-side'))]"
          hx-swap="innerHTML">
       {% with challenge_id = challenge.id %}{% include "_agent_side.html" %}{% endwith %}
     </div>
-    <div class="card" id="agent-error-card" style="display:none;">
-      <p class="mono" id="agent-error" style="color: var(--error);"></p>
+    <div class="card" id="agent-error-card" style="display:none; padding:0; border:none; background:transparent; box-shadow:none;">
+      <div class="koth-alert err">
+        <div style="min-width:0; flex:1;">
+          <strong style="color:var(--error); font-size:0.82rem;">Falha na ação</strong>
+          <p class="mono" id="agent-error" style="color: var(--text); margin:0.2rem 0 0; font-size:0.8rem;"></p>
+        </div>
+        <button type="button" class="btn ghost btn-xs" onclick="document.getElementById('agent-error-card').style.display='none'">Fechar</button>
+      </div>
     </div>
     <div class="card" id="agent-flag-card">
       <h3>Registrar flag</h3>
-      <p style="color: var(--muted); font-size: 0.85rem;">
-        submissão é 100% manual — o framework só valida formato e duplicidade
+      <p style="color: var(--muted); font-size: 0.84rem;">
+        Validação local de formato e duplicidade — envie manualmente no placar oficial.
       </p>
       <form hx-post="/challenges/{{ challenge.id }}/flag"
-            hx-target="#flag-result" hx-swap="innerHTML">
+            hx-target="#flag-result" hx-swap="innerHTML"
+            style="display:grid; gap:0.5rem;">
         <input name="flag" placeholder="CTF{...}" required>
-        <button class="btn">Registrar flag</button>
+        <button class="btn success">Registrar flag</button>
       </form>
       <div id="flag-result"></div>
     </div>
@@ -39,10 +87,14 @@
 document.addEventListener('htmx:responseError', function (evt) {
   var card = document.getElementById('agent-error-card');
   var box = document.getElementById('agent-error');
+  var xhr = evt.detail.xhr;
+  var msg = window.kothParseError ? window.kothParseError(xhr) : ('erro ' + xhr.status + ' — ' + xhr.responseText.slice(0, 200));
   if (card && box) {
-    var xhr = evt.detail.xhr;
-    box.textContent = 'erro ' + xhr.status + ' — ' + xhr.responseText.slice(0, 200);
+    box.textContent = msg;
     card.style.display = 'block';
+  }
+  if (window.kothToast) {
+    window.kothToast('err', 'Ação não concluída', msg);
   }
 });
 </script>

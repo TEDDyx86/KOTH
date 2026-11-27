@@ -1,9 +1,12 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 import threading
+import time
 
 from pydantic_ai import Agent, BinaryContent, ModelRetry, RunContext
+from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ToolReturnPart
+from pydantic_ai.usage import UsageLimits
 from sqlmodel import select
 
 from ..knowledge.index import DEFAULT_KNOWLEDGE_ROOT, KnowledgeIndex
@@ -12,7 +15,7 @@ from ..tooling.koth_mcp import safe_sandbox_file
 from ..tooling.mcp_servers import build_pydantic_toolsets
 from ..tooling.runner import ToolRunner
 from .context import specialist_context
-from .models import run_with_fallback
+from .models import is_transient_provider_error, run_with_fallback
 from .payloads import SpecialistReport, TaskOrder
 
 _IMAGE_MIMES = {
@@ -23,6 +26,7 @@ _IMAGE_MIMES = {
     ".gif": "image/gif",
 }
 _MAX_IMAGE_BYTES = 4 * 1024 * 1024
+DEFAULT_MAX_DISPATCH_TOKENS = 350_000
 
 
 @dataclass
@@ -32,20 +36,32 @@ class RunDeps:
     challenge: object
     order: TaskOrder
     tool_calls: int = 0
+    mcp_calls: int = 0
+    cache_hits: int = 0
+    used_tools: list[str] = field(default_factory=list)
+    detected_flags: list[str] = field(default_factory=list)
+    on_event: object | None = None
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
 def _extract_usage(result) -> dict | None:
-    try:
-        u = result.usage
-    except Exception:
-        return None
+    u = getattr(result, "usage", None)
     if u is None:
         return None
+    if not hasattr(u, "total_tokens") and callable(u):
+        try:
+            u = u()
+        except Exception:
+            return None
+    if u is None:
+        return None
+    inp = int(getattr(u, "input_tokens", None) or getattr(u, "request_tokens", 0) or 0)
+    out = int(getattr(u, "output_tokens", None) or getattr(u, "response_tokens", 0) or 0)
+    tot = int(getattr(u, "total_tokens", 0) or (inp + out))
     return {
-        "input_tokens": getattr(u, "input_tokens", None) or getattr(u, "request_tokens", 0) or 0,
-        "output_tokens": getattr(u, "output_tokens", None) or getattr(u, "response_tokens", 0) or 0,
-        "total_tokens": getattr(u, "total_tokens", 0) or 0,
+        "input_tokens": inp,
+        "output_tokens": out,
+        "total_tokens": tot,
     }
 
 
@@ -98,6 +114,39 @@ def _forensics_images(session, challenge, runner: ToolRunner | None) -> list[Bin
     return images
 
 
+def _is_mcp_transport_error(exc: Exception) -> bool:
+    if isinstance(exc, (UsageLimitExceeded, UnexpectedModelBehavior)):
+        return False
+    msg = f"{type(exc).__name__}: {exc}".lower()
+    if any(code in msg for code in ("429", "401", "403", "502", "503", "rate limit", "api_key")):
+        return False
+    return any(
+        k in msg
+        for k in (
+            "mcp",
+            "stdio",
+            "streamable",
+            "sse",
+            "toolset",
+            "closedresourceerror",
+            "client failed to connect",
+            "failed to initialize server session",
+            "connecterror",
+            "connection refused",
+            "winerror 10061",
+        )
+    )
+
+
+def _emit_event(deps: RunDeps, kind: str, detail: str) -> None:
+    cb = getattr(deps, "on_event", None)
+    if callable(cb):
+        try:
+            cb(kind, detail)
+        except Exception:
+            pass
+
+
 def _build_specialist_agent(
     model,
     persona_text: str,
@@ -128,9 +177,26 @@ def _build_specialist_agent(
                     "return your SpecialistReport now."
                 )
             ctx.deps.tool_calls += 1
-            allowed_list = ", ".join(sorted(ctx.deps.runner.settings.tools))
+            if tool not in ctx.deps.used_tools:
+                ctx.deps.used_tools.append(tool)
+            if hasattr(ctx.deps.runner, "available_tools"):
+                avail = ctx.deps.runner.available_tools()
+                allowed_list = ", ".join(avail) if avail else ", ".join(sorted(ctx.deps.runner.settings.tools))
+            else:
+                allowed_list = ", ".join(sorted(ctx.deps.runner.settings.tools))
+            _emit_event(ctx.deps, "tool", f"{tool} {' '.join(str(a) for a in args[:4])}".strip()[:90])
             try:
-                res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge, tool, args)
+                try:
+                    res = ctx.deps.runner.run(
+                        ctx.deps.session, ctx.deps.challenge, tool, args, use_cache=True
+                    )
+                except TypeError:
+                    res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge, tool, args)
+                if getattr(res, "cache_hit", False):
+                    ctx.deps.cache_hits += 1
+                for fl in getattr(res, "detected_flags", None) or []:
+                    if fl not in ctx.deps.detected_flags:
+                        ctx.deps.detected_flags.append(fl)
             except Exception as exc:  # allowlist/guard/target violations
                 if ctx.deps.session is not None and hasattr(ctx.deps.session, "rollback"):
                     try:
@@ -139,10 +205,14 @@ def _build_specialist_agent(
                         pass
                 raise ModelRetry(
                     f"tool run rejected: {type(exc).__name__}: {exc}. "
-                    f"Allowed tools: {allowed_list}. Retry with a fixed call."
+                    f"Available tools: {allowed_list}. Retry with a fixed call."
                 )
+        flag_banner = ""
+        det = getattr(res, "detected_flags", None) or []
+        if det:
+            flag_banner = f"[AUTO-DETECTED FLAG: {', '.join(det)}]\n"
         return (
-            f"rc={res.returncode} truncated={res.truncated}\n"
+            f"{flag_banner}rc={res.returncode} truncated={res.truncated}\n"
             f"--- stdout ---\n{res.stdout[:4000]}\n"
             f"--- stderr ---\n{res.stderr[:1000]}"
         )
@@ -159,6 +229,9 @@ def _build_specialist_agent(
                     "return your SpecialistReport now."
                 )
             ctx.deps.tool_calls += 1
+            if "python" not in ctx.deps.used_tools:
+                ctx.deps.used_tools.append("python")
+            _emit_event(ctx.deps, "python", (filename or "solve.py")[:80])
             try:
                 workdir = ctx.deps.runner.sandbox_workdir(ctx.deps.challenge)
                 target = safe_sandbox_file(workdir, filename or "solve.py")
@@ -166,6 +239,9 @@ def _build_specialist_agent(
                 target.write_text(code, encoding="utf-8")
                 rel = str(target.relative_to(workdir)).replace("\\", "/")
                 res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge, "python", [rel])
+                for fl in getattr(res, "detected_flags", None) or []:
+                    if fl not in ctx.deps.detected_flags:
+                        ctx.deps.detected_flags.append(fl)
             except Exception as exc:
                 if ctx.deps.session is not None and hasattr(ctx.deps.session, "rollback"):
                     try:
@@ -173,20 +249,31 @@ def _build_specialist_agent(
                     except Exception:
                         pass
                 raise ModelRetry(f"run_python_script failed: {type(exc).__name__}: {exc}")
+        flag_banner = ""
+        det = getattr(res, "detected_flags", None) or []
+        if det:
+            flag_banner = f"[AUTO-DETECTED FLAG: {', '.join(det)}]\n"
         return (
-            f"script={rel} rc={res.returncode} truncated={res.truncated}\n"
+            f"{flag_banner}script={rel} rc={res.returncode} truncated={res.truncated}\n"
             f"--- stdout ---\n{res.stdout[:4000]}\n"
             f"--- stderr ---\n{res.stderr[:1000]}"
         )
 
     @agent.tool(retries=max_tool_retries)
-    def list_sandbox_files(ctx: RunContext[RunDeps]) -> str:
-        """List files currently in the challenge sandbox workdir (/work)."""
+    def list_sandbox_files(ctx: RunContext[RunDeps], subdir: str = "") -> str:
+        """List files currently in the challenge sandbox workdir (/work). Optionally pass a relative subdir."""
         with ctx.deps.lock:
             ctx.deps.runner.stage_downloads(ctx.deps.session, ctx.deps.challenge)
             workdir = ctx.deps.runner.sandbox_workdir(ctx.deps.challenge)
+        clean_sub = (subdir or "").strip()
+        if clean_sub and clean_sub not in (".", "./", "/"):
+            base = safe_sandbox_file(workdir, clean_sub)
+            if not base.exists() or not base.is_dir():
+                return f"subdir not found: {subdir}"
+        else:
+            base = workdir
         items: list[str] = []
-        for p in sorted(workdir.rglob("*")):
+        for p in sorted(base.rglob("*")):
             if p.is_file():
                 rel = str(p.relative_to(workdir)).replace("\\", "/")
                 items.append(f"{rel} ({p.stat().st_size} bytes)")
@@ -238,31 +325,77 @@ class SpecialistRunner:
         max_tool_retries: int = 4,
         fallback_models: list | None = None,
         category: str | None = None,
+        max_dispatch_tokens: int = DEFAULT_MAX_DISPATCH_TOKENS,
     ) -> None:
         self.persona_text = persona_text
         self.max_tool_retries = max_tool_retries
         self.category = category
+        self.max_dispatch_tokens = max(0, int(max_dispatch_tokens))
         self.models = [model, *(fallback_models or [])]
         self.agent = _build_specialist_agent(model, persona_text, max_tool_retries)
         self.last_usage: dict | None = None
         self.last_tool_outputs: list[str] = []
+        self.last_detected_flags: list[str] = []
+        self.last_metrics: dict | None = None
 
-    def run(self, session, challenge, order: TaskOrder, runner: ToolRunner) -> SpecialistReport:
+    def run(
+        self,
+        session,
+        challenge,
+        order: TaskOrder,
+        runner: ToolRunner,
+        *,
+        blackboard: dict | None = None,
+        on_event=None,
+    ) -> SpecialistReport:
         self.last_tool_outputs = []
-        deps = RunDeps(runner=runner, session=session, challenge=challenge, order=order)
-        text_prompt = specialist_context(session, challenge, order)
-        allowed_tools = ", ".join(sorted(runner.settings.tools))
-        text_prompt += f"\n\n## Available sandbox tools\n{allowed_tools}"
+        self.last_detected_flags = []
+        self.last_usage = None
+        self.last_metrics = None
+        deps = RunDeps(
+            runner=runner,
+            session=session,
+            challenge=challenge,
+            order=order,
+            on_event=on_event,
+        )
+        text_prompt = specialist_context(session, challenge, order, blackboard=blackboard)
+
+        if hasattr(runner, "available_tools"):
+            avail = runner.available_tools()
+            all_tools = sorted(runner.settings.tools)
+            missing = [t for t in all_tools if t not in avail]
+            rt = runner.runtime_summary() if hasattr(runner, "runtime_summary") else "unknown"
+            text_prompt += f"\n\n## Runtime & Available sandbox tools\nruntime: {rt}\navailable: {', '.join(avail) or 'none'}"
+            if missing:
+                text_prompt += f"\nnot installed (do NOT invoke): {', '.join(missing)}"
+        else:
+            allowed_tools = ", ".join(sorted(runner.settings.tools))
+            text_prompt += f"\n\n## Available sandbox tools\n{allowed_tools}"
+
         images = _forensics_images(session, challenge, runner) if order.category.lower() == "forensics" else []
         prompt_input: str | list = [text_prompt, *images] if images else text_prompt
 
         cat = self.category or order.category
         mcp_toolsets = build_pydantic_toolsets(category=cat)
 
+        req_limit = max(int(order.max_tool_runs or 5) * 3 + 6, 18)
+        usage_limits = UsageLimits(
+            request_limit=req_limit,
+            total_tokens_limit=self.max_dispatch_tokens or None,
+        )
+
+        used_model_label = getattr(self.models[0], "model_name", str(self.models[0]))
+        t0 = time.monotonic()
+
         def _call(m):
+            nonlocal used_model_label
+            used_model_label = getattr(m, "model_name", str(m))
             deps.tool_calls = 0
+            deps.mcp_calls = 0
+            deps.cache_hits = 0
             if m is self.models[0] and not mcp_toolsets:
-                return self.agent.run_sync(prompt_input, deps=deps)
+                return self.agent.run_sync(prompt_input, deps=deps, usage_limits=usage_limits)
             ag = _build_specialist_agent(
                 m,
                 self.persona_text,
@@ -270,15 +403,53 @@ class SpecialistRunner:
                 toolsets=mcp_toolsets or None,
             )
             try:
-                return ag.run_sync(prompt_input, deps=deps)
-            except Exception:
-                if mcp_toolsets:
-                    # Fallback cleanly if an external MCP server is unreachable mid-run
+                return ag.run_sync(prompt_input, deps=deps, usage_limits=usage_limits)
+            except Exception as exc:
+                if mcp_toolsets and _is_mcp_transport_error(exc):
+                    # Fallback cleanly only when an external MCP server is unreachable
+                    deps.tool_calls = 0
+                    deps.mcp_calls = 0
                     fallback_ag = _build_specialist_agent(m, self.persona_text, self.max_tool_retries)
-                    return fallback_ag.run_sync(prompt_input, deps=deps)
+                    return fallback_ag.run_sync(prompt_input, deps=deps, usage_limits=usage_limits)
                 raise
 
-        result = run_with_fallback(self.models, _call)
+        try:
+            result = run_with_fallback(self.models, _call)
+        except UsageLimitExceeded as exc:
+            duration_s = round(time.monotonic() - t0, 2)
+            self.last_metrics = {
+                "role": f"specialist:{cat}",
+                "model": used_model_label,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "duration_s": duration_s,
+                "tool_calls": deps.tool_calls,
+                "mcp_calls": deps.mcp_calls,
+                "cache_hits": deps.cache_hits,
+                "limit_hit": str(exc)[:120],
+            }
+            return SpecialistReport(
+                status="NEED_HINT",
+                findings=[f"dispatch usage limit reached ({exc}); partial outputs saved in sandbox"],
+                next_step="narrow scope, inspect saved files in /work or mcp_outputs/, and avoid broad dumps",
+                tools_used=list(deps.used_tools),
+            )
+
+        duration_s = round(time.monotonic() - t0, 2)
         self.last_usage = _extract_usage(result)
         self.last_tool_outputs = _extract_tool_outputs(result)
+        self.last_detected_flags = list(deps.detected_flags)
+        u = self.last_usage or {}
+        self.last_metrics = {
+            "role": f"specialist:{cat}",
+            "model": used_model_label,
+            "input_tokens": int(u.get("input_tokens", 0)),
+            "output_tokens": int(u.get("output_tokens", 0)),
+            "total_tokens": int(u.get("total_tokens", 0)),
+            "duration_s": duration_s,
+            "tool_calls": deps.tool_calls,
+            "mcp_calls": deps.mcp_calls,
+            "cache_hits": deps.cache_hits,
+        }
         return result.output

@@ -255,6 +255,9 @@ def update_model_roles(
     *,
     fallback_provider: str | None = None,
     fallback_name: str | None = None,
+    fast_fallback_provider: str | None = None,
+    fast_fallback_name: str | None = None,
+    clear_fast_fallback: bool = False,
     models_path: Path | None = None,
 ) -> None:
     raw = _load_raw_models_yaml(models_path)
@@ -272,6 +275,14 @@ def update_model_roles(
         ]
     else:
         raw["fallbacks"].pop("strong", None)
+
+    if fast_fallback_provider and fast_fallback_name and fast_fallback_name.strip():
+        _ensure_provider_in_raw(raw, fast_fallback_provider)
+        raw["fallbacks"]["fast"] = [
+            {"provider": fast_fallback_provider, "name": fast_fallback_name.strip()}
+        ]
+    elif clear_fast_fallback:
+        raw["fallbacks"].pop("fast", None)
     _save_raw_models_yaml(raw, models_path)
 
 

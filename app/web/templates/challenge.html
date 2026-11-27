@@ -2,14 +2,17 @@
 {% block title %}{{ challenge.title }} — KOTH{% endblock %}
 {% block content %}
 <h1>{{ challenge.title }}
-  <span class="badge {{ 'solved' if challenge.status.value == 'solved' else '' }}">{{ challenge.status.value }}</span>
-  {% if challenge.flag %}<span class="badge flag-ok mono">{{ challenge.flag }}</span>{% endif %}
+  <span class="badge {{ 'flag-ok' if challenge.status.value == 'solved' else ('neutral' if challenge.status.value == 'gave_up' else '') }}">{{ challenge.status.value }}</span>
+  {% if challenge.flag %}
+    <span class="badge flag-ok mono">{{ challenge.flag }}</span>
+    <button type="button" class="btn ghost btn-xs" onclick="kothCopy('{{ challenge.flag|e }}', this)">Copiar flag</button>
+  {% endif %}
 </h1>
 <div class="row-actions" style="justify-content: space-between; align-items: center; margin-bottom: 1rem;">
   <p class="mono" style="color: var(--muted); margin: 0;">
     {{ challenge.category }} · {{ challenge.points }} pts
     {% if challenge.difficulty %} · {{ challenge.difficulty.value }}{% endif %}
-    {% if challenge.target %} · target: {{ challenge.target }}{% endif %}
+    {% if challenge.target %} · target: <code class="koth-copy-pill">{{ challenge.target }}</code> <button type="button" class="btn ghost btn-xs" onclick="kothCopy('{{ challenge.target|e }}', this)">Copiar</button>{% endif %}
     · {{ summary.attempt_count }} tentativas
     {% if summary.active_seconds is not none %} · {{ (summary.active_seconds / 60) | round(1) }} min ativos{% endif %}
   </p>
@@ -17,7 +20,7 @@
     <a class="btn" href="/challenges/{{ challenge.id }}/agent">Abrir Painel do Agente →</a>
     <button type="button" class="btn ghost" onclick="var d=document.getElementById('edit-challenge'); d.open=true; d.scrollIntoView({behavior:'smooth'});">Editar</button>
     <form method="post" action="/challenges/{{ challenge.id }}/delete"
-          onsubmit="return confirm('Apagar o challenge {{ challenge.title|e }} e todos os seus anexos/tentativas?');">
+          onsubmit="return kothConfirmForm(this, 'Apagar o challenge {{ challenge.title|e }} e todos os seus anexos/tentativas?');">
       <input type="hidden" name="next" value="/events/{{ challenge.event_id }}">
       <button class="btn danger" type="submit">Apagar</button>
     </form>
@@ -55,13 +58,20 @@
 
 <section class="card">
   <h2>Anexos</h2>
+  {% if attachments %}
   <ul>
     {% for a in attachments %}
       <li class="mono">{{ a.name }} <small style="color: var(--muted);">({{ a.type.value }}, {{ a.size }} bytes)</small></li>
-    {% else %}
-      <li style="color: var(--muted);">Nenhum anexo.</li>
     {% endfor %}
   </ul>
+  {% else %}
+  <div class="koth-empty" style="margin-bottom:0.75rem;">
+    <strong>Nenhum arquivo anexado</strong>
+    <p style="color: var(--muted); margin: 0.25rem 0 0; font-size:0.82rem;">
+      Envie binários, PCAPs, imagens ou códigos-fonte para disponibilizá-los no sandbox <code>/work</code>.
+    </p>
+  </div>
+  {% endif %}
   <form method="post" action="/challenges/{{ challenge.id }}/attachments" enctype="multipart/form-data" style="display:flex; gap:0.5rem; max-width:560px;">
     <input type="file" name="files" multiple required>
     <select name="type" style="width:auto;">
@@ -75,6 +85,7 @@
 
 <section class="card">
   <h2>Timeline de tentativas</h2>
+  {% if attempts %}
   <ul>
     {% for a in attempts %}
       <li class="mono" style="font-size: 0.85rem;">
@@ -83,10 +94,16 @@
         {% if a.tool_command %}<small style="color: var(--muted);"> · {{ a.tool_command }}</small>{% endif %}
         {% if a.learning %}<br><small style="color: var(--muted);">aprendizado: {{ a.learning }}</small>{% endif %}
       </li>
-    {% else %}
-      <li style="color: var(--muted);">Nenhuma tentativa ainda.</li>
     {% endfor %}
   </ul>
+  {% else %}
+  <div class="koth-empty">
+    <strong>Nenhuma tentativa registrada ainda</strong>
+    <p style="color: var(--muted); margin: 0.25rem 0 0; font-size:0.82rem;">
+      Abra o Painel do Agente ou registre uma tentativa manual abaixo.
+    </p>
+  </div>
+  {% endif %}
   <form method="post" action="/challenges/{{ challenge.id }}/attempts" style="display:grid; gap:0.5rem; max-width:640px; margin-top:1rem;">
     <input name="description" placeholder="O que foi tentado" required>
     <input name="tool_command" placeholder="Comando/ferramenta (opcional)">

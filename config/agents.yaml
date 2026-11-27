@@ -39,3 +39,4 @@ roles:
 limits:
   max_attempts: 20
   max_minutes: 90
+  max_dispatch_tokens: 350000

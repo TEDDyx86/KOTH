@@ -13,6 +13,8 @@
         <p>Converse com o OP, cole enunciados de desafios ou anexe arquivos para escalar direto rumo à flag.</p>
       </div>
       <div class="cli-shortcuts">
+        <button type="button" class="cli-chip mono" onclick="kothPrefillCmd('/solve ')">/solve</button>
+        <button type="button" class="cli-chip mono" onclick="kothPrefillCmd('/resume ')">/resume</button>
         <button type="button" class="cli-chip mono" onclick="kothRunCmd('/rank')">/rank</button>
         <button type="button" class="cli-chip mono" onclick="kothRunCmd('/events')">/events</button>
         <button type="button" class="cli-chip mono" onclick="kothRunCmd('/status')">/status</button>
@@ -75,6 +77,14 @@
 </div>
 
 <script>
+function kothPrefillCmd(prefix) {
+  var inp = document.getElementById('cli-input');
+  if (inp) {
+    inp.value = prefix;
+    inp.focus();
+    inp.setSelectionRange(prefix.length, prefix.length);
+  }
+}
 function kothRunCmd(cmd) {
   var inp = document.getElementById('cli-input');
   var form = document.getElementById('cli-form');

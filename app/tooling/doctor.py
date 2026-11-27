@@ -51,25 +51,47 @@ def _docker_which_batch(image: str, names: list[str], *, timeout_s: float = 10.0
 
 def inventory(settings: ToolSettings) -> list[dict]:
     docker_groups: dict[str, list[str]] = {}
+    auto_groups: dict[str, list[str]] = {}
     for name, spec in settings.tools.items():
         if spec.mode == "docker":
             img = spec.image or settings.defaults.docker_image
             docker_groups.setdefault(img, []).append(name)
+        elif spec.mode == "auto":
+            img = spec.image or settings.defaults.docker_image
+            auto_groups.setdefault(img, []).append(name)
 
     docker_paths: dict[str, str | None] = {}
     for img, names in docker_groups.items():
         docker_paths.update(_docker_which_batch(img, names))
 
+    auto_docker_ready: dict[str, bool] = {}
+    for img, names in auto_groups.items():
+        st = docker_status(img)
+        ready = bool(st.get("daemon_running") and st.get("image_present"))
+        auto_docker_ready[img] = ready
+        if ready:
+            docker_paths.update(_docker_which_batch(img, names))
+
     rows = []
     for name in sorted(settings.tools):
         spec = settings.tools[name]
+        effective_mode = spec.mode
         if spec.mode == "docker":
             path = docker_paths.get(name)
+        elif spec.mode == "auto":
+            img = spec.image or settings.defaults.docker_image
+            if auto_docker_ready.get(img):
+                path = docker_paths.get(name) or shutil.which(name)
+                effective_mode = "auto→docker" if docker_paths.get(name) else "auto→native"
+            else:
+                path = shutil.which(name)
+                effective_mode = "auto→native"
         else:
             path = shutil.which(name)
         rows.append({
             "name": name,
-            "mode": spec.mode,
+            "mode": effective_mode,
+            "configured_mode": spec.mode,
             "path": path,
             "present": path is not None,
         })

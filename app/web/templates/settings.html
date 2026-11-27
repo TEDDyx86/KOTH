@@ -4,7 +4,7 @@
 <h1>Configurações do KOTH</h1>
 
 {% if saved %}
-<div class="card card-ok">
+<div class="koth-alert ok" style="margin-bottom:1rem;">
   <p class="mono" style="margin:0;">
     <span class="badge flag-ok">atualizado</span>
     {% if saved == "limits" %}Limites do Planner salvos em config/agents.yaml e aplicados ao runtime.
@@ -18,6 +18,13 @@
     {% endif %}
   </p>
 </div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  if (window.kothToast) {
+    window.kothToast('ok', 'Configuração aplicada', 'Alterações salvas e aplicadas ao runtime.');
+  }
+});
+</script>
 {% endif %}
 
 <div class="koth-tabs" role="tablist">
@@ -89,16 +96,16 @@
           <div class="row-actions">
             {% if p.strong_default %}
             <form method="post" action="/settings/providers/{{ p.name }}/activate">
-              <button class="btn ghost" type="submit" style="padding:0.28rem 0.65rem; font-size:0.78rem;">Usar agora</button>
+              <button class="btn ghost btn-sm" type="submit">Usar agora</button>
             </form>
             {% endif %}
-            <button class="btn ghost" type="button" style="padding:0.28rem 0.65rem; font-size:0.78rem;"
+            <button class="btn ghost btn-sm" type="button"
                     hx-post="/settings/providers/{{ p.name }}/test"
                     hx-target="#test-{{ p.name }}"
                     hx-swap="innerHTML"
                     hx-disabled-elt="this">Testar</button>
             <form method="post" action="/settings/providers/{{ p.name }}/delete">
-              <button class="btn ghost" type="submit" style="padding:0.28rem 0.65rem; font-size:0.78rem;">Remover</button>
+              <button class="btn danger btn-sm" type="submit">Remover</button>
             </form>
           </div>
         </div>
@@ -106,7 +113,12 @@
       {% endfor %}
     </div>
     {% else %}
-    <p style="color:var(--muted); margin:0;">Nenhum provedor API conectado ainda. Clique em <strong>+ Adicionar provedor</strong> acima.</p>
+    <div class="koth-empty">
+      <strong>Nenhum provedor API conectado ainda</strong>
+      <p style="color:var(--muted); margin:0.25rem 0 0; font-size:0.83rem;">
+        Clique em <strong>+ Adicionar provedor</strong> acima ou importe chaves do OpenCode.
+      </p>
+    </div>
     {% endif %}
   </section>
 
@@ -133,13 +145,13 @@
           <div class="row-actions">
             <form method="post" action="/settings/cli-providers/{{ c.name }}/activate">
               <input type="hidden" name="scope" value="strong">
-              <button class="btn ghost" type="submit" style="padding:0.25rem 0.6rem; font-size:0.78rem;">Usar OP/Júri</button>
+              <button class="btn ghost btn-sm" type="submit">Usar OP/Júri</button>
             </form>
             <form method="post" action="/settings/cli-providers/{{ c.name }}/activate">
               <input type="hidden" name="scope" value="all">
-              <button class="btn ghost" type="submit" style="padding:0.25rem 0.6rem; font-size:0.78rem;">Usar em tudo</button>
+              <button class="btn ghost btn-sm" type="submit">Usar em tudo</button>
             </form>
-            <button class="btn ghost" type="button" style="padding:0.25rem 0.6rem; font-size:0.78rem;"
+            <button class="btn ghost btn-sm" type="button"
                     hx-post="/settings/cli-providers/{{ c.name }}/test"
                     hx-target="#test-{{ c.name }}"
                     hx-swap="innerHTML"
@@ -164,7 +176,7 @@
       <div class="provider-row">
         <div class="row-actions" style="justify-content:space-between; align-items:center; margin-bottom:0.45rem;">
           <strong>strong — OP, Júri e Planner</strong>
-          <button type="button" class="btn ghost" style="padding:0.22rem 0.55rem; font-size:0.76rem;"
+          <button type="button" class="btn ghost btn-xs"
                   hx-get="/settings/models/options?role=strong"
                   hx-include="[name='strong_provider']"
                   hx-target="#strong-model-box"
@@ -203,7 +215,7 @@
       <div class="provider-row">
         <div class="row-actions" style="justify-content:space-between; align-items:center; margin-bottom:0.45rem;">
           <strong>fast — Especialistas (Web, Pwn, Crypto, Reverse, Forensics, OSINT)</strong>
-          <button type="button" class="btn ghost" style="padding:0.22rem 0.55rem; font-size:0.76rem;"
+          <button type="button" class="btn ghost btn-xs"
                   hx-get="/settings/models/options?role=fast"
                   hx-include="[name='fast_provider']"
                   hx-target="#fast-model-box"
@@ -274,6 +286,41 @@
         </div>
       </div>
 
+      <div class="provider-row">
+        <div class="row-actions" style="justify-content:space-between; align-items:center; margin-bottom:0.45rem;">
+          <strong>Fallback do fast (opcional)</strong>
+        </div>
+        <div class="form-grid">
+          <select name="fast_fallback_provider"
+                  hx-get="/settings/models/options?role=fast_fallback"
+                  hx-trigger="change"
+                  hx-include="this"
+                  hx-target="#fast-fallback-model-box"
+                  hx-swap="innerHTML">
+            <option value="">(sem fallback)</option>
+            {% for p in providers_status %}
+              <option value="{{ p.name }}" {% if fast_fallback and fast_fallback.provider == p.name %}selected{% endif %}>
+                {{ p.label }}{% if p.connected %} ✓{% endif %}
+              </option>
+            {% endfor %}
+            {% for c in cli_providers %}
+              <option value="{{ c.name }}" {% if fast_fallback and fast_fallback.provider == c.name %}selected{% endif %}>
+                {{ c.label }}{% if c.installed %} ✓{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <div id="fast-fallback-model-box">
+            {% set field_name = "fast_fallback_name" %}
+            {% set role = "fast_fallback" %}
+            {% set provider = fast_fallback.provider if fast_fallback else '' %}
+            {% set models = fast_fallback_models %}
+            {% set source = fast_fallback_src %}
+            {% set current = fast_fallback.name if fast_fallback else '' %}
+            {% include "_model_options.html" %}
+          </div>
+        </div>
+      </div>
+
       <div class="row-actions">
         <button class="btn" type="submit">Aplicar modelos</button>
       </div>
@@ -318,13 +365,36 @@
                 hx-target="#docker-sandbox-status"
                 hx-swap="innerHTML"
                 hx-disabled-elt="this">Build Dockerfile.sandbox</button>
+        <button class="btn ghost" type="button"
+                hx-post="/settings/sandbox/reset-containers"
+                hx-target="#docker-sandbox-status"
+                hx-swap="innerHTML"
+                hx-disabled-elt="this">Resetar containers</button>
       </div>
     </div>
+
+    {% if missing_tools_count or (docker_info and not docker_info.daemon_running) %}
+    <div class="koth-alert warn" style="margin-bottom:0.8rem;">
+      <div>
+        <strong style="color:var(--warning); font-size:0.82rem;">Aviso de ambiente / sandbox</strong>
+        <div style="font-size:0.8rem; color:var(--muted-light); margin-top:0.2rem;">
+          {% if docker_info and not docker_info.daemon_running %}Docker: {{ docker_info.message }}. {% endif %}
+          {% if missing_tools_count %}{{ missing_tools_count }} ferramenta(s) ausente(s) no modo atual — os agentes serão informados apenas das ferramentas disponíveis.{% endif %}
+        </div>
+      </div>
+      <button class="btn ghost btn-xs" type="button"
+              hx-post="/settings/sandbox/test"
+              hx-target="#docker-sandbox-status"
+              hx-swap="innerHTML"
+              hx-disabled-elt="this">Testar Docker</button>
+    </div>
+    {% endif %}
 
     <form method="post" action="/settings/sandbox/mode" class="form-grid" style="margin-bottom:0.85rem; align-items:end;">
       <label style="font-size:0.82rem; color:var(--muted);">
         Backend de execução
         <select name="mode">
+          <option value="auto" {% if sandbox_mode == 'auto' %}selected{% endif %}>auto (Docker Kali quando ativo, fallback native)</option>
           <option value="native" {% if sandbox_mode == 'native' %}selected{% endif %}>native (ferramentas do host)</option>
           <option value="docker" {% if sandbox_mode == 'docker' %}selected{% endif %}>docker (container isolado Kali)</option>
         </select>
@@ -332,6 +402,10 @@
       <label style="font-size:0.82rem; color:var(--muted);">
         Imagem Docker
         <input name="docker_image" value="{{ tools_cfg.defaults.docker_image }}" placeholder="koth-sandbox:latest">
+      </label>
+      <label class="cli-toggle" style="padding-bottom:0.45rem;">
+        <input type="checkbox" name="persistent_docker" value="true" {% if tools_cfg.defaults.persistent_docker %}checked{% endif %}>
+        <span>Container Docker persistente por desafio</span>
       </label>
       <button class="btn" type="submit">Aplicar sandbox</button>
     </form>

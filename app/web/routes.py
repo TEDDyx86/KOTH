@@ -15,6 +15,7 @@ from ..agents.cli_providers import (
 from ..agents.config import AGENTS_PATH, MODELS_PATH, load_agents, load_models
 from ..agents.planner import planner_rank
 from ..agents.writeup import (
+    build_arsenal_digest,
     build_challenge_writeup,
     build_event_writeup,
     build_proof_bundle_zip,
@@ -55,6 +56,7 @@ from ..tooling.sandbox import (
     build_sandbox_image,
     current_sandbox_mode,
     docker_status,
+    reset_persistent_containers,
     switch_tools_mode,
 )
 from .theme import load_active_theme, save_active_theme, theme_options
@@ -214,14 +216,19 @@ def dashboard(request: Request, session: Session = Depends(get_session)):
     challenge_states: dict[int, dict] = {}
     running_count = 0
     awaiting_count = 0
+    total_cost_usd = 0.0
     for ch in ctx["nav_open_challenges"]:
         if orch is not None and hasattr(orch, "latest_for_challenge"):
             sess = orch.latest_for_challenge(session, ch.id)
             if sess is not None:
                 st = sess.state
+                sdict = sess.to_dict() if hasattr(sess, "to_dict") else {}
+                cost = float(sdict.get("estimated_cost_usd", 0.0) or 0.0)
+                total_cost_usd += cost
                 challenge_states[ch.id] = {
                     "state": st,
                     "dispatch_count": sess.dispatch_count,
+                    "cost_usd": cost,
                 }
                 if st == "running":
                     running_count += 1
@@ -273,6 +280,7 @@ def dashboard(request: Request, session: Session = Depends(get_session)):
             "running_count": running_count,
             "awaiting_count": awaiting_count,
             "events_count": len(events),
+            "total_cost_usd": round(total_cost_usd, 4),
         },
     })
     return templates.TemplateResponse(request, "dashboard.html", ctx)
@@ -309,6 +317,7 @@ def settings_page(request: Request, saved: str | None = None,
     cli_providers = cli_provider_status_rows()
     knowledge_count = KnowledgeIndex(session, knowledge_root=DEFAULT_KNOWLEDGE_ROOT).count()
     strong_fb = models_cfg.fallbacks.get("strong", [])
+    fast_fb = models_cfg.fallbacks.get("fast", [])
     strong_ref = models_cfg.roles.get("strong")
     fast_ref = models_cfg.roles.get("fast")
 
@@ -318,19 +327,27 @@ def settings_page(request: Request, saved: str | None = None,
         fast_ref.provider if fast_ref else "", "fast", storage_dir)
     fb_models, fb_src = _models_for_role(
         strong_fb[0].provider if strong_fb else "", "fallback", storage_dir)
+    fast_fb_models, fast_fb_src = _models_for_role(
+        fast_fb[0].provider if fast_fb else "", "fast_fallback", storage_dir)
+    dk_info = docker_status(tools_cfg.defaults.docker_image)
 
     ctx.update({
         "models_cfg": models_cfg,
         "strong_fallback": strong_fb[0] if strong_fb else None,
+        "fast_fallback": fast_fb[0] if fast_fb else None,
         "strong_models": strong_models,
         "strong_src": strong_src,
         "fast_models": fast_models,
         "fast_src": fast_src,
         "fallback_models": fb_models,
         "fallback_src": fb_src,
+        "fast_fallback_models": fast_fb_models,
+        "fast_fallback_src": fast_fb_src,
         "agents_cfg": agents_cfg,
         "tools_rows": tools_rows,
         "tools_cfg": tools_cfg,
+        "missing_tools_count": sum(1 for r in tools_rows if not r["present"]),
+        "docker_info": dk_info,
         "mcp_rows": mcp_rows,
         "mcp_snippet": mcp_snippet,
         "sandbox_mode": sandbox_mode,
@@ -365,10 +382,12 @@ def settings_model_options(request: Request,
                            strong_provider: str = "",
                            fast_provider: str = "",
                            fallback_provider: str = "",
+                           fast_fallback_provider: str = "",
                            current: str = ""):
     chosen = provider or (
         strong_provider if role == "strong"
         else fast_provider if role == "fast"
+        else fast_fallback_provider if role == "fast_fallback"
         else fallback_provider
     )
     storage_dir = request.app.state.storage.storage_dir
@@ -410,7 +429,8 @@ def settings_add_provider(request: Request,
             fallback_name=strong_fb[0].name if strong_fb else None,
             models_path=MODELS_PATH,
         )
-    request.app.state._orchestrator = None
+    from ..agents.api import reload_orchestrator
+    reload_orchestrator(request.app)
     return RedirectResponse("/settings?tab=providers&saved=provider", status_code=303)
 
 
@@ -442,14 +462,16 @@ def settings_activate_cli_provider(request: Request, provider_name: str,
         fallback_name=strong_fb[0].name if strong_fb else None,
         models_path=MODELS_PATH,
     )
-    request.app.state._orchestrator = None
+    from ..agents.api import reload_orchestrator
+    reload_orchestrator(request.app)
     return RedirectResponse("/settings?tab=models&saved=models", status_code=303)
 
 
 @router.post("/settings/providers/import-opencode")
 def settings_import_opencode(request: Request):
     import_opencode_keys(request.app.state.storage.storage_dir, models_path=MODELS_PATH)
-    request.app.state._orchestrator = None
+    from ..agents.api import reload_orchestrator
+    reload_orchestrator(request.app)
     return RedirectResponse("/settings?tab=providers&saved=imported", status_code=303)
 
 
@@ -464,7 +486,8 @@ def settings_save_provider(request: Request, provider_name: str,
         base_url=base_url if base_url.strip() or provider_name in ("nine_router", "ollama") else None,
         models_path=MODELS_PATH,
     )
-    request.app.state._orchestrator = None
+    from ..agents.api import reload_orchestrator
+    reload_orchestrator(request.app)
     return RedirectResponse("/settings?tab=providers&saved=provider", status_code=303)
 
 
@@ -475,7 +498,8 @@ def settings_delete_provider(request: Request, provider_name: str):
         provider_name,
         models_path=MODELS_PATH,
     )
-    request.app.state._orchestrator = None
+    from ..agents.api import reload_orchestrator
+    reload_orchestrator(request.app)
     return RedirectResponse("/settings?tab=providers&saved=removed", status_code=303)
 
 
@@ -495,7 +519,8 @@ def settings_activate_provider(request: Request, provider_name: str):
         fallback_name=strong_fb[0].name if strong_fb else None,
         models_path=MODELS_PATH,
     )
-    request.app.state._orchestrator = None
+    from ..agents.api import reload_orchestrator
+    reload_orchestrator(request.app)
     return RedirectResponse("/settings?tab=models&saved=models", status_code=303)
 
 
@@ -516,7 +541,9 @@ def settings_save_models(request: Request,
                          fast_provider: str = Form(...),
                          fast_name: str = Form(...),
                          fallback_provider: str = Form(""),
-                         fallback_name: str = Form("")):
+                         fallback_name: str = Form(""),
+                         fast_fallback_provider: str = Form(""),
+                         fast_fallback_name: str = Form("")):
     update_model_roles(
         strong_provider,
         strong_name,
@@ -524,9 +551,12 @@ def settings_save_models(request: Request,
         fast_name,
         fallback_provider=fallback_provider.strip() or None,
         fallback_name=fallback_name.strip() or None,
+        fast_fallback_provider=fast_fallback_provider.strip() or None,
+        fast_fallback_name=fast_fallback_name.strip() or None,
         models_path=MODELS_PATH,
     )
-    request.app.state._orchestrator = None
+    from ..agents.api import reload_orchestrator
+    reload_orchestrator(request.app)
     return RedirectResponse("/settings?tab=models&saved=models", status_code=303)
 
 
@@ -550,11 +580,28 @@ def update_limits(request: Request,
 @router.post("/settings/sandbox/mode")
 def settings_sandbox_mode(request: Request,
                           mode: str = Form("native"),
-                          docker_image: str = Form("koth-sandbox:latest")):
-    chosen = "docker" if mode == "docker" else "native"
-    switch_tools_mode(chosen, docker_image=docker_image, tools_path=TOOLS_PATH)
-    request.app.state._orchestrator = None
+                          docker_image: str = Form("koth-sandbox:latest"),
+                          persistent_docker: bool = Form(False)):
+    chosen = mode if mode in ("docker", "auto", "native") else "native"
+    switch_tools_mode(
+        chosen,
+        docker_image=docker_image,
+        persistent_docker=persistent_docker,
+        tools_path=TOOLS_PATH,
+    )
+    from ..agents.api import reload_orchestrator
+    reload_orchestrator(request.app)
     return RedirectResponse("/settings?tab=runtime&saved=sandbox", status_code=303)
+
+
+@router.post("/settings/sandbox/reset-containers")
+def settings_sandbox_reset_containers(request: Request):
+    stopped = reset_persistent_containers()
+    return templates.TemplateResponse(
+        request,
+        "_provider_test.html",
+        {"ok": True, "msg": f"{stopped} container(s) persistente(s) encerrado(s)"},
+    )
 
 
 @router.post("/settings/sandbox/test")
@@ -577,7 +624,8 @@ def settings_sandbox_build(request: Request):
 def settings_mcp_toggle(request: Request, name: str = Form(...)):
     try:
         toggle_mcp_server(name, path=MCP_PATH)
-        request.app.state._orchestrator = None
+        from ..agents.api import reload_orchestrator
+        reload_orchestrator(request.app)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"MCP '{name}' não encontrado")
     return RedirectResponse("/settings?tab=runtime&saved=mcp", status_code=303)
@@ -608,7 +656,8 @@ def settings_mcp_add(request: Request,
             enabled=True,
             path=MCP_PATH,
         )
-        request.app.state._orchestrator = None
+        from ..agents.api import reload_orchestrator
+        reload_orchestrator(request.app)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return RedirectResponse("/settings?tab=runtime&saved=mcp", status_code=303)
@@ -617,7 +666,8 @@ def settings_mcp_add(request: Request,
 @router.post("/settings/mcp/delete")
 def settings_mcp_delete(request: Request, name: str = Form(...)):
     delete_mcp_server(name, path=MCP_PATH)
-    request.app.state._orchestrator = None
+    from ..agents.api import reload_orchestrator
+    reload_orchestrator(request.app)
     return RedirectResponse("/settings?tab=runtime&saved=mcp", status_code=303)
 
 
@@ -725,6 +775,7 @@ def create_challenge_quick(request: Request,
 @router.get("/events/{event_id}")
 def event_page(request: Request, event_id: int, category: str | None = None,
                status: str | None = None, sort: str | None = None,
+               imported: str | None = None, skipped: str | None = None,
                session: Session = Depends(get_session)):
     event = session.get(Event, event_id)
     if event is None:
@@ -743,8 +794,38 @@ def event_page(request: Request, event_id: int, category: str | None = None,
         "category": category,
         "status": status,
         "sort": sort,
+        "imported": imported,
+        "skipped": skipped,
     })
     return templates.TemplateResponse(request, "event.html", ctx)
+
+
+@router.post("/events/{event_id}/import/ctfd")
+def import_ctfd_form(request: Request, event_id: int,
+                     base_url: str = Form(...),
+                     api_token: str = Form(""),
+                     session_cookie: str = Form(""),
+                     session: Session = Depends(get_session)):
+    from ..services.importer import import_ctfd_challenges
+
+    event = session.get(Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="event not found")
+    try:
+        res = import_ctfd_challenges(
+            session,
+            request.app.state.storage,
+            event_id,
+            base_url,
+            api_token=api_token,
+            session_cookie=session_cookie,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Falha ao importar CTFd: {exc}")
+    return RedirectResponse(
+        f"/events/{event_id}?imported={res['imported']}&skipped={res['skipped']}",
+        status_code=303,
+    )
 
 
 @router.post("/events/{event_id}/challenges")
@@ -933,7 +1014,7 @@ def save_challenge_to_arsenal(request: Request, challenge_id: int,
         raise HTTPException(status_code=404, detail="challenge not found")
     storage = getattr(request.app.state, "storage", None)
     sess = _latest_session_for(request, session, challenge_id)
-    md = build_challenge_writeup(session, ch, agent_session=sess, storage=storage)
+    md = build_arsenal_digest(session, ch, agent_session=sess, storage=storage)
     dest, count = save_writeup_to_arsenal(session, ch, md, knowledge_root=DEFAULT_KNOWLEDGE_ROOT)
     return templates.TemplateResponse(
         request,

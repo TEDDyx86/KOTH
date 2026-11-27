@@ -1,5 +1,6 @@
 import json
 import re
+import subprocess
 import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -103,13 +104,15 @@ def test_tool_runner_docker_mode_argv(tmp_path, monkeypatch, env):
 
     captured = {}
 
-    def fake_run(argv, cwd, capture_output, timeout, creationflags):
+    def fake_run(argv, cwd, stdin=None, capture_output=True, timeout=None, creationflags=0):
         captured["argv"] = argv
+        captured["stdin"] = stdin
         return SimpleNamespace(returncode=0, stdout=b"ok", stderr=b"")
 
     monkeypatch.setattr("app.tooling.runner.subprocess.run", fake_run)
     res = runner.run_raw(ch, "nmap", ["--top-ports", "10", "localhost"])
     assert res.stdout == "ok"
+    assert captured["stdin"] == subprocess.DEVNULL
     assert captured["argv"][0] == "docker.exe"
     assert "kalilinux/kali-rolling" in captured["argv"]
     assert "-w" in captured["argv"] and "/work" in captured["argv"]

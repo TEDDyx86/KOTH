@@ -1,12 +1,15 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import (
+    BinaryContent,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -18,6 +21,7 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.usage import RequestUsage
 
 
 @dataclass(frozen=True)
@@ -64,9 +68,13 @@ CLI_PROVIDER_CATALOG: tuple[CliProviderSpec, ...] = (
         label="Google Antigravity CLI (agy)",
         executable="agy",
         login_hint="agy (autenticado no Antigravity)",
-        strong_default="gemini-4-neon-high",
+        strong_default="gemini-4-hydrogen-high",
         fast_default="gemini-3.8-flash-medium",
         models=(
+            "gemini-4-hydrogen-high",
+            "gemini-4-hydrogen-xhigh",
+            "gemini-4-hydrogen-medium",
+            "gemini-4-hydrogen-low",
             "gemini-4-neon-high",
             "gemini-4-neon-xhigh",
             "gemini-4-neon-medium",
@@ -74,10 +82,6 @@ CLI_PROVIDER_CATALOG: tuple[CliProviderSpec, ...] = (
             "gemini-4-argon-high",
             "gemini-4-argon-medium",
             "gemini-4-argon-low",
-            "gemini-4-hydrogen-high",
-            "gemini-4-hydrogen-xhigh",
-            "gemini-4-hydrogen-medium",
-            "gemini-4-hydrogen-low",
             "gemini-pro-orchestrator-neon",
             "gemini-pro-orchestrator-g1-pro",
             "gemini-3.8-flash-high",
@@ -100,6 +104,39 @@ CLI_CATALOG_BY_NAME: dict[str, CliProviderSpec] = {c.name: c for c in CLI_PROVID
 
 def is_cli_provider(provider_name: str) -> bool:
     return provider_name in CLI_CATALOG_BY_NAME
+
+
+_AGY_DENY_TOOLS_SETTINGS = json.dumps({
+    "permissions": {
+        "deny": [
+            "run_command",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "search_web",
+            "call_mcp_tool",
+            "list_resources",
+            "read_resource",
+            "invoke_subagent",
+            "swarm",
+            "run_workflow",
+            "schedule",
+        ]
+    }
+})
+
+_REFUSAL_RE = re.compile(
+    r"^\s*(?:desculpe|sinto muito|não posso|nao posso|sorry|i(?:'m| am) sorry|i cannot|i can't|as an ai)\b",
+    re.IGNORECASE,
+)
+
+
+def _check_structured_refusal(provider_name: str, model_name: str, raw: str) -> None:
+    if _REFUSAL_RE.match(raw or ""):
+        excerpt = " ".join(raw.strip().splitlines())[:220]
+        raise UnexpectedModelBehavior(
+            f"Model '{provider_name}:{model_name}' refused structured request: {excerpt}"
+        )
 
 
 def build_cli_command(
@@ -145,6 +182,7 @@ def build_cli_command(
             "--input-format", "stream-json",
             "--output-format", "stream-json",
             "--disable-slash-commands",
+            "--settings", _AGY_DENY_TOOLS_SETTINGS,
         ]
         if use_model:
             cmd.extend(["--model", model])
@@ -153,9 +191,10 @@ def build_cli_command(
     raise ValueError(f"unknown CLI provider: {provider_name}")
 
 
-def _parse_agy_stream_json(stdout: str) -> str:
-    """Extract the final assistant response from agy --output-format stream-json NDJSON."""
+def _parse_agy_stream_json_with_usage(stdout: str) -> tuple[str, RequestUsage | None]:
+    """Extract the final assistant response and optional usage from agy stream-json NDJSON."""
     deltas: list[str] = []
+    usage: RequestUsage | None = None
     for raw_line in stdout.splitlines():
         line = raw_line.strip()
         if not line.startswith("{"):
@@ -169,12 +208,24 @@ def _parse_agy_stream_json(stdout: str) -> str:
             res = obj.get("result") or {}
             if str(res.get("status", "")).upper() == "ERROR":
                 raise RuntimeError(f"agy CLI failed: {res.get('error') or 'unknown error'}")
-            return str(res.get("response") or "").strip()
+            u = res.get("usage") or obj.get("usage")
+            if isinstance(u, dict):
+                inp = int(u.get("input_tokens") or u.get("prompt_tokens") or 0)
+                out = int(u.get("output_tokens") or u.get("completion_tokens") or 0)
+                if inp or out:
+                    usage = RequestUsage(input_tokens=inp, output_tokens=out)
+            return str(res.get("response") or "").strip(), usage
         if ev == "step_update":
             upd = obj.get("step_update") or {}
             if upd.get("step_type") == "agent_response" and upd.get("text_delta"):
                 deltas.append(str(upd["text_delta"]))
-    return "".join(deltas).strip() or stdout.strip()
+    return ("".join(deltas).strip() or stdout.strip()), usage
+
+
+def _parse_agy_stream_json(stdout: str) -> str:
+    """Extract the final assistant response from agy --output-format stream-json NDJSON."""
+    text, _ = _parse_agy_stream_json_with_usage(stdout)
+    return text
 
 
 def _run_cli_prompt(
@@ -184,6 +235,17 @@ def _run_cli_prompt(
     *,
     timeout_s: int = 180,
 ) -> str:
+    text, _ = _run_cli_prompt_with_usage(provider_name, model_name, prompt, timeout_s=timeout_s)
+    return text
+
+
+def _run_cli_prompt_with_usage(
+    provider_name: str,
+    model_name: str,
+    prompt: str,
+    *,
+    timeout_s: int = 180,
+) -> tuple[str, RequestUsage]:
     spec = CLI_CATALOG_BY_NAME[provider_name]
     exe = shutil.which(spec.executable)
     if exe is None:
@@ -228,8 +290,18 @@ def _run_cli_prompt(
             err_msg = (stderr or stdout or f"exit code {proc.returncode}")[:400]
             raise RuntimeError(f"{spec.executable} CLI failed: {err_msg}")
         if provider_name == "cli_agy":
-            return _parse_agy_stream_json(stdout)
-        return stdout
+            raw_text, parsed_usage = _parse_agy_stream_json_with_usage(stdout)
+            if parsed_usage is None:
+                parsed_usage = RequestUsage(
+                    input_tokens=max(1, len(prompt) // 4),
+                    output_tokens=max(1, len(raw_text) // 4),
+                )
+            return raw_text, parsed_usage
+        est_usage = RequestUsage(
+            input_tokens=max(1, len(prompt) // 4),
+            output_tokens=max(1, len(stdout) // 4),
+        )
+        return stdout, est_usage
     finally:
         if out_path is not None and out_path.exists():
             try:
@@ -252,16 +324,28 @@ def _extract_json_object(text: str) -> dict | None:
         pass
 
     decoder = json.JSONDecoder()
-    for idx, ch in enumerate(text):
-        if ch != "{":
+    candidates: list[dict] = []
+    idx = 0
+    while idx < len(text):
+        if text[idx] != "{":
+            idx += 1
             continue
         try:
-            obj, _ = decoder.raw_decode(text, idx)
+            obj, end = decoder.raw_decode(text, idx)
             if isinstance(obj, dict):
-                return obj
+                candidates.append(obj)
+                idx = max(end, idx + 1)
+                continue
         except json.JSONDecodeError:
-            continue
-    return None
+            pass
+        idx += 1
+
+    if not candidates:
+        return None
+    for obj in reversed(candidates):
+        if ("tool" in obj and "args" in obj) or "output" in obj or "action" in obj or "status" in obj:
+            return obj
+    return candidates[-1]
 
 
 def _render_cli_prompt(messages: list[ModelMessage], info: AgentInfo) -> str:
@@ -278,9 +362,18 @@ def _render_cli_prompt(messages: list[ModelMessage], info: AgentInfo) -> str:
                     if isinstance(part.content, str):
                         sections.append(f"## User\n{part.content}")
                     else:
-                        txt = [str(item) for item in part.content if isinstance(item, str)]
-                        if txt:
-                            sections.append("## User\n" + "\n".join(txt))
+                        chunks: list[str] = []
+                        for item in part.content:
+                            if isinstance(item, str):
+                                chunks.append(item)
+                            elif isinstance(item, BinaryContent):
+                                mtype = getattr(item, "media_type", "application/octet-stream")
+                                size = len(getattr(item, "data", b"") or b"")
+                                chunks.append(
+                                    f"[attached binary/image: {mtype}, {size} bytes — inspect via sandbox file tools]"
+                                )
+                        if chunks:
+                            sections.append("## User\n" + "\n".join(chunks))
                 elif isinstance(part, ToolReturnPart):
                     sections.append(f"## Tool Result ({part.tool_name})\n{part.content}")
                 elif isinstance(part, RetryPromptPart):
@@ -329,27 +422,35 @@ def make_cli_model(provider_name: str, model_name: str, timeout_s: int = 180) ->
 
     def _fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         prompt = _render_cli_prompt(messages, info)
-        raw = _run_cli_prompt(provider_name, model_name, prompt, timeout_s=timeout_s)
+        raw, usage = _run_cli_prompt_with_usage(provider_name, model_name, prompt, timeout_s=timeout_s)
 
         if info.function_tools and info.output_tools:
-            parsed = _extract_json_object(raw) or {}
+            parsed = _extract_json_object(raw)
+            if parsed is None:
+                _check_structured_refusal(provider_name, model_name, raw)
+                parsed = {}
             if "tool" in parsed and "args" in parsed:
-                return ModelResponse(parts=[
-                    ToolCallPart(tool_name=str(parsed["tool"]), args=json.dumps(parsed["args"]))
-                ])
+                return ModelResponse(
+                    parts=[ToolCallPart(tool_name=str(parsed["tool"]), args=json.dumps(parsed["args"]))],
+                    usage=usage,
+                )
             out_payload = parsed.get("output", parsed)
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name=info.output_tools[0].name, args=json.dumps(out_payload))
-            ])
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name=info.output_tools[0].name, args=json.dumps(out_payload))],
+                usage=usage,
+            )
 
         if info.output_tools:
             parsed = _extract_json_object(raw)
+            if parsed is None:
+                _check_structured_refusal(provider_name, model_name, raw)
             payload_str = json.dumps(parsed) if parsed is not None else raw
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name=info.output_tools[0].name, args=payload_str)
-            ])
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name=info.output_tools[0].name, args=payload_str)],
+                usage=usage,
+            )
 
-        return ModelResponse(parts=[TextPart(content=raw)])
+        return ModelResponse(parts=[TextPart(content=raw)], usage=usage)
 
     return FunctionModel(_fn, model_name=f"{provider_name}:{model_name or spec.strong_default}")
 

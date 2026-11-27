@@ -9,6 +9,8 @@ providers:
     env_var: ANTHROPIC_API_KEY
   openai:
     env_var: OPENAI_API_KEY
+  cli_agy:
+    mode: cli
 roles:
   strong:
     provider: nvidia

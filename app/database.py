@@ -1,8 +1,21 @@
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from sqlmodel import Session, SQLModel, create_engine
 
 from .config import settings
 from .models import *  # noqa: F401,F403 — register SQLModel tables
+
+
+def configure_sqlite_engine(engine) -> None:
+    """Enable WAL mode, busy_timeout, and normal sync on every SQLite connection."""
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL;")
+            cursor.execute("PRAGMA busy_timeout=15000;")
+            cursor.execute("PRAGMA synchronous=NORMAL;")
+        finally:
+            cursor.close()
 
 
 def ensure_schema(engine) -> None:
@@ -34,8 +47,9 @@ def default_engine():
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(
         f"sqlite:///{settings.db_path}",
-        connect_args={"check_same_thread": False},
+        connect_args={"check_same_thread": False, "timeout": 30},
     )
+    configure_sqlite_engine(engine)
     SQLModel.metadata.create_all(engine)
     ensure_schema(engine)
     _ENGINES[db_key] = engine

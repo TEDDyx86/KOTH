@@ -18,7 +18,7 @@
     <a class="btn ghost" href="/events/{{ event.id }}/writeup.md">Exportar Writeups (.md)</a>
     <button type="button" class="btn ghost" onclick="var d=document.getElementById('edit-event'); d.open=!d.open;">Editar evento</button>
     <form method="post" action="/events/{{ event.id }}/delete"
-          onsubmit="return confirm('Apagar o evento {{ event.name|e }} e TODOS os seus challenges/anexos?');">
+          onsubmit="return kothConfirmForm(this, 'Apagar o evento {{ event.name|e }} e TODOS os seus challenges/anexos?');">
       <button class="btn danger" type="submit">Apagar evento</button>
     </form>
   </div>
@@ -52,7 +52,24 @@
 </details>
 
 <section class="card">
-  <h2>+ Novo challenge</h2>
+  <div class="dash-card-head">
+    <h2>+ Novo challenge</h2>
+    <button type="button" class="btn ghost btn-sm" onclick="var d=document.getElementById('import-ctfd'); d.open=!d.open;">Importar de CTFd</button>
+  </div>
+  {% if imported is not none %}
+  <div class="koth-alert ok" style="margin-bottom:0.75rem;">
+    <span class="mono" style="font-size:0.82rem;">Importação concluída: {{ imported }} novo(s), {{ skipped or 0 }} já existente(s).</span>
+  </div>
+  {% endif %}
+  <details id="import-ctfd" style="margin-bottom:0.85rem;">
+    <summary class="mono" style="cursor:pointer; color:var(--muted); font-size:0.82rem;">Importação em lote via API CTFd (/api/v1/challenges)</summary>
+    <form method="post" action="/events/{{ event.id }}/import/ctfd" class="form-grid" style="margin-top:0.65rem; align-items:end;">
+      <input name="base_url" placeholder="URL do CTFd (ex: https://ctf.example.com)" required>
+      <input name="api_token" type="password" placeholder="API Token (opcional)" autocomplete="off">
+      <input name="session_cookie" type="password" placeholder="Cookie session=... (opcional)" autocomplete="off">
+      <button class="btn" type="submit">Importar desafios</button>
+    </form>
+  </details>
   <form method="post" action="/events/{{ event.id }}/challenges" enctype="multipart/form-data" style="display:grid; gap:0.6rem;">
     {% set ch = none %}
     {% include "_challenge_fields.html" %}
@@ -105,7 +122,7 @@
               <a class="btn ghost btn-sm" href="/challenges/{{ c.id }}/agent">Agente →</a>
               <a class="btn ghost btn-sm" href="/challenges/{{ c.id }}#edit-challenge">Editar</a>
               <form method="post" action="/challenges/{{ c.id }}/delete"
-                    onsubmit="return confirm('Apagar o challenge {{ c.title|e }}?');">
+                    onsubmit="return kothConfirmForm(this, 'Apagar o challenge {{ c.title|e }}?');">
                 <input type="hidden" name="next" value="/events/{{ event.id }}">
                 <button class="btn danger btn-sm" type="submit">Apagar</button>
               </form>

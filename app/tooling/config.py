@@ -20,6 +20,7 @@ class Defaults:
     timeout_s: int = 300
     output_limit_mb: int = 10
     docker_image: str = "kalilinux/kali-rolling"
+    persistent_docker: bool = False
 
 
 @dataclass
@@ -45,5 +46,6 @@ def load_tools_config(path: Path | None = None) -> ToolSettings:
         timeout_s=int(d.get("timeout_s", 300)),
         output_limit_mb=int(d.get("output_limit_mb", 10)),
         docker_image=str(d.get("docker_image", "kalilinux/kali-rolling")),
+        persistent_docker=bool(d.get("persistent_docker", False)),
     )
     return settings

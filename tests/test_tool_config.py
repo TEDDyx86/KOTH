@@ -10,9 +10,9 @@ def test_load_seed_config():
         "tshark", "foremost", "steghide", "openssl", "john",
     ]:
         assert name in settings.tools
-        assert settings.tools[name].mode in ("native", "docker")
+        assert settings.tools[name].mode in ("native", "docker", "auto")
     assert settings.defaults.timeout_s == 300
-    assert settings.defaults.output_limit_mb == 10
+    assert settings.defaults.output_limit_mb == 2
     assert settings.defaults.docker_image == "koth-sandbox:latest"
 
 
