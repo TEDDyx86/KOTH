@@ -1,6 +1,7 @@
 import re
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -101,6 +102,7 @@ class ToolRunner:
         self.storage = storage
         self._cmd_cache: dict[tuple, tuple[tuple, ToolRunResult]] = {}
         self._approved_targets: dict[int, set[str]] = {}
+        self._db_lock = threading.RLock()
 
     def approve_target(self, challenge_id: int | None, target: str) -> str:
         host = _extract_host(target)
@@ -258,7 +260,8 @@ class ToolRunner:
         return args
 
     def run_raw(self, challenge, tool: str, args: list[str],
-                timeout_s: int | None = None, output_limit_mb: int | None = None) -> ToolRunResult:
+                timeout_s: int | None = None, output_limit_mb: int | None = None,
+                *, on_output_chunk=None, cancel_event: threading.Event | None = None) -> ToolRunResult:
         default_t = 20 if tool in ("ncat", "nc") else self.settings.defaults.timeout_s
         timeout = timeout_s or default_t
         limit_mb = output_limit_mb if output_limit_mb is not None else self.settings.defaults.output_limit_mb
@@ -281,16 +284,24 @@ class ToolRunner:
 
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         start = time.monotonic()
-        try:
-            proc = subprocess.run(argv, cwd=str(workdir), stdin=subprocess.DEVNULL,
-                                  capture_output=True, timeout=timeout, creationflags=creationflags)
+
+        if on_output_chunk is None and cancel_event is None:
+            try:
+                proc = subprocess.run(argv, cwd=str(workdir), stdin=subprocess.DEVNULL,
+                                      capture_output=True, timeout=timeout, creationflags=creationflags)
+                duration = time.monotonic() - start
+                stdout, stderr = proc.stdout or b"", proc.stderr or b""
+                returncode: int | None = proc.returncode
+            except subprocess.TimeoutExpired as exc:
+                duration = time.monotonic() - start
+                stdout, stderr = exc.stdout or b"", exc.stderr or b""
+                returncode = None
+        else:
+            stdout, stderr, returncode = self._run_streaming_popen(
+                argv, workdir, timeout, creationflags,
+                on_output_chunk=on_output_chunk, cancel_event=cancel_event,
+            )
             duration = time.monotonic() - start
-            stdout, stderr = proc.stdout or b"", proc.stderr or b""
-            returncode: int | None = proc.returncode
-        except subprocess.TimeoutExpired as exc:
-            duration = time.monotonic() - start
-            stdout, stderr = exc.stdout or b"", exc.stderr or b""
-            returncode = None
 
         limit_bytes = max(limit_mb, 0) * 1024 * 1024
         if limit_bytes <= 0:
@@ -303,6 +314,77 @@ class ToolRunner:
                              stdout=stdout.decode("utf-8", "replace"),
                              stderr=stderr.decode("utf-8", "replace"),
                              duration_s=duration, truncated=truncated)
+
+    @staticmethod
+    def _run_streaming_popen(
+        argv: list[str],
+        workdir: Path,
+        timeout: int | float,
+        creationflags: int,
+        *,
+        on_output_chunk=None,
+        cancel_event: threading.Event | None = None,
+    ) -> tuple[bytes, bytes, int | None]:
+        if cancel_event is not None and cancel_event.is_set():
+            return b"", b"[cancelled before start]", None
+        proc = subprocess.Popen(
+            argv, cwd=str(workdir), stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            creationflags=creationflags,
+        )
+        out_chunks: list[bytes] = []
+        err_chunks: list[bytes] = []
+
+        def _pump(pipe, bucket: list[bytes], stream_name: str) -> None:
+            try:
+                while True:
+                    line = pipe.readline()
+                    if not line:
+                        break
+                    bucket.append(line)
+                    if callable(on_output_chunk):
+                        try:
+                            on_output_chunk(stream_name, line.decode("utf-8", "replace"))
+                        except Exception:
+                            pass
+            finally:
+                try:
+                    pipe.close()
+                except Exception:
+                    pass
+
+        t_out = threading.Thread(target=_pump, args=(proc.stdout, out_chunks, "stdout"), daemon=True)
+        t_err = threading.Thread(target=_pump, args=(proc.stderr, err_chunks, "stderr"), daemon=True)
+        t_out.start()
+        t_err.start()
+
+        deadline = time.monotonic() + float(timeout)
+        returncode: int | None = None
+        cancelled = False
+        timed_out = False
+        while proc.poll() is None:
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
+                proc.terminate()
+                break
+            if time.monotonic() >= deadline:
+                timed_out = True
+                proc.terminate()
+                break
+            time.sleep(0.03)
+        try:
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+                proc.wait(timeout=2)
+            except Exception:
+                pass
+        t_out.join(timeout=1.5)
+        t_err.join(timeout=1.5)
+        if not cancelled and not timed_out:
+            returncode = proc.returncode
+        return b"".join(out_chunks), b"".join(err_chunks), returncode
 
     def _workdir_sig(self, workdir: Path) -> tuple[tuple[str, int, int], ...]:
         try:
@@ -318,7 +400,8 @@ class ToolRunner:
     def run(self, session, challenge, tool: str, args: list[str],
             attempt_result: AttemptResult | None = None,
             timeout_s: int | None = None, output_limit_mb: int | None = None,
-            use_cache: bool = False) -> ToolRunResult:
+            use_cache: bool = False,
+            *, on_output_chunk=None, cancel_event: threading.Event | None = None) -> ToolRunResult:
         from ..services import tracking
 
         self.stage_downloads(session, challenge)
@@ -336,8 +419,10 @@ class ToolRunner:
                     cache_hit=True,
                 )
 
-        res = self.run_raw(challenge, tool, args, timeout_s=timeout_s,
-                           output_limit_mb=output_limit_mb)
+        res = self.run_raw(
+            challenge, tool, args, timeout_s=timeout_s, output_limit_mb=output_limit_mb,
+            on_output_chunk=on_output_chunk, cancel_event=cancel_event,
+        )
         detected = _scan_output_flags(session, challenge, f"{res.stdout}\n{res.stderr}")
         res.detected_flags = detected
         effective_result = (
@@ -349,12 +434,6 @@ class ToolRunner:
                    f"=== returncode ===\n{res.returncode}\n\n"
                    f"{res.stdout}\n--- stderr ---\n{res.stderr}")
         path = self.storage.save(challenge.id, f"{tool}_output.txt", content.encode("utf-8"))
-        attachment = Attachment(challenge_id=challenge.id, name=f"{tool}_output.txt",
-                                path=str(path.relative_to(self.storage.storage_dir)),
-                                mime="text/plain", size=len(content), type=AttachmentType.output)
-        session.add(attachment)
-        session.commit()
-        session.refresh(attachment)
         combined_out = res.stdout.strip()
         if res.stderr.strip():
             err_block = f"[stderr] {res.stderr.strip()}"
@@ -362,13 +441,21 @@ class ToolRunner:
         if detected:
             flag_hdr = f"[FLAG DETECTED: {', '.join(detected)}]"
             combined_out = f"{flag_hdr}\n{combined_out}".strip()
-        attempt = tracking.record_attempt(
-            session, challenge.id, AttemptType.tool,
-            f"{tool} run (rc={res.returncode})", effective_result,
-            tool_command=" ".join(res.argv),
-            learning=combined_out[:2000])
+        with self._db_lock:
+            attachment = Attachment(challenge_id=challenge.id, name=f"{tool}_output.txt",
+                                    path=str(path.relative_to(self.storage.storage_dir)),
+                                    mime="text/plain", size=len(content), type=AttachmentType.output)
+            session.add(attachment)
+            session.commit()
+            session.refresh(attachment)
+            attempt = tracking.record_attempt(
+                session, challenge.id, AttemptType.tool,
+                f"{tool} run (rc={res.returncode})", effective_result,
+                tool_command=" ".join(res.argv),
+                learning=combined_out[:2000])
         res.attachment_id = attachment.id
         res.attempt_id = attempt.id
         if use_cache and tool in CACHEABLE_READONLY_TOOLS:
-            self._cmd_cache[cache_key] = (sig, res)
+            with self._db_lock:
+                self._cmd_cache[cache_key] = (sig, res)
         return res

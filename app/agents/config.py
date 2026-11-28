@@ -27,6 +27,7 @@ class ModelsConfig:
     providers: dict[str, ProviderCfg] = field(default_factory=dict)
     roles: dict[str, ModelRef] = field(default_factory=dict)
     fallbacks: dict[str, list[ModelRef]] = field(default_factory=dict)
+    active_profile: str | None = None
 
 
 @dataclass
@@ -39,7 +40,7 @@ class AgentCfg:
 @dataclass
 class AgentsConfig:
     roles: dict[str, AgentCfg] = field(default_factory=dict)
-    limits: dict[str, int] = field(default_factory=dict)
+    limits: dict[str, object] = field(default_factory=dict)
 
 
 def _model_ref(raw) -> ModelRef:
@@ -63,6 +64,8 @@ def load_models(path: Path | None = None) -> ModelsConfig:
         cfg.roles[str(role)] = _model_ref(m or {})
     for role, refs in (raw.get("fallbacks") or {}).items():
         cfg.fallbacks[str(role)] = [_model_ref(r) for r in refs or []]
+    raw_prof = raw.get("active_profile")
+    cfg.active_profile = (str(raw_prof).strip() or None) if raw_prof else None
     return cfg
 
 

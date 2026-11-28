@@ -7,7 +7,7 @@ import httpx
 import yaml
 
 from .cli_providers import CLI_CATALOG_BY_NAME, is_cli_provider
-from .config import MODELS_PATH, ModelsConfig, load_models
+from .config import AGENTS_PATH, MODELS_PATH, AgentsConfig, ModelsConfig, load_models
 
 
 @dataclass(frozen=True)
@@ -283,7 +283,186 @@ def update_model_roles(
         ]
     elif clear_fast_fallback:
         raw["fallbacks"].pop("fast", None)
+    raw.pop("active_profile", None)
     _save_raw_models_yaml(raw, models_path)
+
+
+@dataclass(frozen=True)
+class ModelProfile:
+    name: str
+    label: str
+    description: str
+    strong: tuple[str, str]
+    fast: tuple[str, str]
+    strong_fallbacks: tuple[tuple[str, str], ...]
+    fast_fallbacks: tuple[tuple[str, str], ...]
+    role_routing: dict[str, str]
+
+
+_COMBO_ROUTING: dict[str, str] = {
+    "op": "strong",
+    "planner": "strong",
+    "jury": "strong",
+    "specialist_crypto": "strong",
+    "specialist_reversing": "strong",
+    "specialist_forensics": "strong",
+    "specialist_osint": "strong",
+    "recon": "fast",
+    "submission": "fast",
+    "specialist_web": "fast",
+    "specialist_pwn": "fast",
+    "specialist_misc": "fast",
+}
+
+_CLASSIC_ROUTING: dict[str, str] = {
+    "op": "strong",
+    "planner": "strong",
+    "jury": "strong",
+    "recon": "fast",
+    "submission": "fast",
+    "specialist_web": "fast",
+    "specialist_pwn": "fast",
+    "specialist_crypto": "fast",
+    "specialist_reversing": "fast",
+    "specialist_forensics": "fast",
+    "specialist_osint": "fast",
+    "specialist_misc": "fast",
+}
+
+ROLE_LABELS: dict[str, str] = {
+    "op": "OP — Terminal Principal",
+    "jury": "Júri — Decisão & Estratégia",
+    "planner": "Planner — Priorização",
+    "specialist_crypto": "Especialista Crypto",
+    "specialist_reversing": "Especialista Reversing",
+    "specialist_forensics": "Especialista Forensics",
+    "specialist_osint": "Especialista OSINT",
+    "specialist_web": "Especialista Web",
+    "specialist_pwn": "Especialista Pwn",
+    "specialist_misc": "Especialista Misc",
+    "recon": "Recon",
+    "submission": "Submission",
+}
+
+MODEL_PROFILES: tuple[ModelProfile, ...] = (
+    ModelProfile(
+        name="combo",
+        label="Combo (NEON XHigh + Codex GPT-6.1-Sol)",
+        description=(
+            "Antigravity gemini-4-neon-xhigh nas tarefas de raciocínio profundo "
+            "(OP, Júri, Planner, Crypto, Reversing, Forensics, OSINT) + Codex gpt-6.1-sol "
+            "nas tarefas de execução rápida e código (Web, Pwn, Misc, Recon, Submission)."
+        ),
+        strong=("cli_agy", "gemini-4-neon-xhigh"),
+        fast=("cli_codex", "gpt-6.1-sol"),
+        strong_fallbacks=(
+            ("cli_codex", "gpt-6.1-sol"),
+            ("nvidia", "nvidia/nemotron-3-ultra-550b-a55b"),
+        ),
+        fast_fallbacks=(
+            ("cli_agy", "gemini-4-neon-xhigh"),
+            ("cli_agy", "gemini-3.8-flash-medium"),
+            ("nvidia", "nvidia/nemotron-3.5-super-vl-120b-a12b"),
+        ),
+        role_routing=_COMBO_ROUTING,
+    ),
+    ModelProfile(
+        name="agy_max",
+        label="Antigravity CLI (NEON XHigh + Flash)",
+        description=(
+            "Antigravity gemini-4-neon-xhigh para OP/Júri/Planner e "
+            "gemini-3.8-flash-medium para todos os especialistas."
+        ),
+        strong=("cli_agy", "gemini-4-neon-xhigh"),
+        fast=("cli_agy", "gemini-3.8-flash-medium"),
+        strong_fallbacks=(("cli_codex", "gpt-6.1-sol"),),
+        fast_fallbacks=(("cli_agy", "gemini-4-neon-xhigh"),),
+        role_routing=_CLASSIC_ROUTING,
+    ),
+    ModelProfile(
+        name="codex_all",
+        label="OpenAI Codex CLI (GPT-6.1-Sol Full)",
+        description=(
+            "Codex gpt-6.1-sol na camada strong (OP/Júri/Planner) e gpt-6-luna "
+            "nos especialistas rápidos."
+        ),
+        strong=("cli_codex", "gpt-6.1-sol"),
+        fast=("cli_codex", "gpt-6-luna"),
+        strong_fallbacks=(("cli_agy", "gemini-4-neon-xhigh"),),
+        fast_fallbacks=(("cli_codex", "gpt-6.1-sol"),),
+        role_routing=_CLASSIC_ROUTING,
+    ),
+)
+
+PROFILE_BY_NAME: dict[str, ModelProfile] = {p.name: p for p in MODEL_PROFILES}
+
+
+def apply_model_profile(
+    profile_name: str,
+    *,
+    models_path: Path | None = None,
+    agents_path: Path | None = None,
+) -> ModelProfile:
+    prof = PROFILE_BY_NAME.get(profile_name)
+    if prof is None:
+        raise KeyError(profile_name)
+
+    raw_models = _load_raw_models_yaml(models_path)
+    _ensure_provider_in_raw(raw_models, prof.strong[0])
+    _ensure_provider_in_raw(raw_models, prof.fast[0])
+    for fb_prov, _ in (*prof.strong_fallbacks, *prof.fast_fallbacks):
+        _ensure_provider_in_raw(raw_models, fb_prov)
+
+    raw_models["active_profile"] = prof.name
+    raw_models.setdefault("roles", {})
+    raw_models["roles"]["strong"] = {"provider": prof.strong[0], "name": prof.strong[1]}
+    raw_models["roles"]["fast"] = {"provider": prof.fast[0], "name": prof.fast[1]}
+    raw_models["fallbacks"] = {
+        "strong": [{"provider": p, "name": n} for p, n in prof.strong_fallbacks],
+        "fast": [{"provider": p, "name": n} for p, n in prof.fast_fallbacks],
+    }
+    _save_raw_models_yaml(raw_models, models_path)
+
+    ap = agents_path or AGENTS_PATH
+    if ap.exists():
+        with open(ap, "r", encoding="utf-8") as fh:
+            raw_agents = yaml.safe_load(fh) or {}
+        roles = raw_agents.setdefault("roles", {})
+        for role_name, tier in prof.role_routing.items():
+            if role_name in roles and isinstance(roles[role_name], dict):
+                roles[role_name]["model"] = tier
+        with open(ap, "w", encoding="utf-8") as fh:
+            yaml.safe_dump(raw_agents, fh, sort_keys=False, allow_unicode=True)
+
+    return prof
+
+
+def detect_active_profile(
+    models_cfg: ModelsConfig,
+    agents_cfg: AgentsConfig | None = None,
+) -> str | None:
+    strong_ref = models_cfg.roles.get("strong")
+    fast_ref = models_cfg.roles.get("fast")
+    if strong_ref is None or fast_ref is None:
+        return None
+    s_pair = (strong_ref.provider, strong_ref.name)
+    f_pair = (fast_ref.provider, fast_ref.name)
+
+    explicit = models_cfg.active_profile
+    if explicit and explicit in PROFILE_BY_NAME:
+        prof = PROFILE_BY_NAME[explicit]
+        if prof.strong == s_pair and prof.fast == f_pair:
+            return explicit
+
+    for prof in MODEL_PROFILES:
+        if prof.strong == s_pair and prof.fast == f_pair:
+            if agents_cfg is None or all(
+                agents_cfg.roles[r].model == t
+                for r, t in prof.role_routing.items()
+                if r in agents_cfg.roles
+            ):
+                return prof.name
+    return None
 
 
 def opencode_auth_path() -> Path:

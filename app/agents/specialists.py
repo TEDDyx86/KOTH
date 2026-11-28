@@ -41,6 +41,9 @@ class RunDeps:
     used_tools: list[str] = field(default_factory=list)
     detected_flags: list[str] = field(default_factory=list)
     on_event: object | None = None
+    on_output_chunk: object | None = None
+    cancel_event: threading.Event | None = None
+    branch_label: str | None = None
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -170,6 +173,11 @@ def _build_specialist_agent(
         """Execute an allowlisted tool against the challenge via the sandbox.
         Returns captured stdout/stderr (truncated)."""
         with ctx.deps.lock:
+            if ctx.deps.cancel_event is not None and ctx.deps.cancel_event.is_set():
+                raise ModelRetry(
+                    "race cancelled — another branch already solved or operator stopped; "
+                    "stop calling tools and return your SpecialistReport immediately."
+                )
             limit = max(int(ctx.deps.order.max_tool_runs or 1), 1)
             if ctx.deps.tool_calls >= limit:
                 raise ModelRetry(
@@ -188,10 +196,17 @@ def _build_specialist_agent(
             try:
                 try:
                     res = ctx.deps.runner.run(
-                        ctx.deps.session, ctx.deps.challenge, tool, args, use_cache=True
+                        ctx.deps.session, ctx.deps.challenge, tool, args, use_cache=True,
+                        on_output_chunk=ctx.deps.on_output_chunk,
+                        cancel_event=ctx.deps.cancel_event,
                     )
                 except TypeError:
-                    res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge, tool, args)
+                    try:
+                        res = ctx.deps.runner.run(
+                            ctx.deps.session, ctx.deps.challenge, tool, args, use_cache=True
+                        )
+                    except TypeError:
+                        res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge, tool, args)
                 if getattr(res, "cache_hit", False):
                     ctx.deps.cache_hits += 1
                 for fl in getattr(res, "detected_flags", None) or []:
@@ -222,6 +237,11 @@ def _build_specialist_agent(
         """Write a Python script inside the challenge sandbox workdir (/work) and execute it.
         Ideal for pwntools exploits, Z3/SymPy crypto solvers, Scapy PCAP parsing, and HTTP scripts."""
         with ctx.deps.lock:
+            if ctx.deps.cancel_event is not None and ctx.deps.cancel_event.is_set():
+                raise ModelRetry(
+                    "race cancelled — another branch already solved or operator stopped; "
+                    "stop calling tools and return your SpecialistReport immediately."
+                )
             limit = max(int(ctx.deps.order.max_tool_runs or 1), 1)
             if ctx.deps.tool_calls >= limit:
                 raise ModelRetry(
@@ -238,7 +258,14 @@ def _build_specialist_agent(
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(code, encoding="utf-8")
                 rel = str(target.relative_to(workdir)).replace("\\", "/")
-                res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge, "python", [rel])
+                try:
+                    res = ctx.deps.runner.run(
+                        ctx.deps.session, ctx.deps.challenge, "python", [rel],
+                        on_output_chunk=ctx.deps.on_output_chunk,
+                        cancel_event=ctx.deps.cancel_event,
+                    )
+                except TypeError:
+                    res = ctx.deps.runner.run(ctx.deps.session, ctx.deps.challenge, "python", [rel])
                 for fl in getattr(res, "detected_flags", None) or []:
                     if fl not in ctx.deps.detected_flags:
                         ctx.deps.detected_flags.append(fl)
@@ -347,6 +374,9 @@ class SpecialistRunner:
         *,
         blackboard: dict | None = None,
         on_event=None,
+        on_output_chunk=None,
+        cancel_event: threading.Event | None = None,
+        branch_label: str | None = None,
     ) -> SpecialistReport:
         self.last_tool_outputs = []
         self.last_detected_flags = []
@@ -358,6 +388,9 @@ class SpecialistRunner:
             challenge=challenge,
             order=order,
             on_event=on_event,
+            on_output_chunk=on_output_chunk,
+            cancel_event=cancel_event,
+            branch_label=branch_label,
         )
         text_prompt = specialist_context(session, challenge, order, blackboard=blackboard)
 

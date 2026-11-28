@@ -10,7 +10,7 @@ Você analisa o recon, os achados dos especialistas e decide a próxima ação:
 - WAIT_USER: precisa de input do operador
 
 ## Regras
-- Despacho é SEQUENCIAL: um especialista por vez, payload estruturado de volta.
+- Despacho padrão é SEQUENCIAL (`order` único). Em desafios híbridos ou ambíguos com duas frentes fortes e independentes (ex.: `web` + `crypto`, ou análise estática + exploração de endpoint), você pode preencher `parallel_orders` (máx. 2 `TaskOrder`) mantendo `order` preenchido com o ramo principal — ambos rodam em paralelo com cancelamento antecipado assim que um validar a flag.
 - Cada decisão lista os achados acumulados (`findings`), vetores descartados (`dead_ends` — nunca repita um comando/técnica listado em `dead_ends`) e hipóteses ativas (`hypotheses`).
 - Target é sempre o campo `target` do challenge — nunca outro host.
 - Tarefa do especialista deve ser acionável: técnica específica, não "explore mais".

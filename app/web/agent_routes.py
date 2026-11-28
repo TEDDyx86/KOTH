@@ -1,9 +1,11 @@
 """Painel do Agente — rotas HTMX (feed, checkpoint, flag manual, sandbox /work, lote)."""
+import asyncio
+import json
 from pathlib import Path
 import shutil
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from sqlmodel import Session
 
 from ..agents.api import get_orchestrator
@@ -158,6 +160,73 @@ def agent_side(request: Request, challenge_id: int,
     orch = _sessions_of(request)
     sess = _selected_session(orch, challenge_id, session=session, session_id=session_id)
     return _side(request, challenge_id, sess, max_attempts=_budget_max(orch, sess))
+
+
+def _format_sse(ev: dict) -> str:
+    payload = json.dumps({"ts": ev.get("ts"), **(ev.get("data") or {})}, ensure_ascii=False)
+    return f"id: {ev['id']}\nevent: {ev['type']}\ndata: {payload}\n\n"
+
+
+@router.get("/challenges/{challenge_id}/agent/stream")
+async def agent_stream(
+    request: Request,
+    challenge_id: int,
+    session_id: str | None = None,
+    max_events: int | None = None,
+    session: Session = Depends(get_session),
+):
+    from ..agents.events import event_bus as default_bus
+
+    _challenge_or_404(session, challenge_id)
+    orch = _sessions_of(request)
+    sess = _selected_session(orch, challenge_id, session=session, session_id=session_id)
+    bus = getattr(orch, "event_bus", None) or default_bus
+
+    raw_last = request.headers.get("last-event-id") or ""
+    last_id = int(raw_last) if raw_last.strip().isdigit() else None
+    target_sid = sess.id if sess is not None else f"challenge:{challenge_id}"
+
+    async def _gen():
+        loop = asyncio.get_running_loop()
+        replay, q, unsub = bus.subscribe(target_sid, loop, last_event_id=last_id)
+        sent = 0
+        try:
+            for item in replay:
+                yield _format_sse(item)
+                sent += 1
+                if max_events is not None and sent >= max_events:
+                    return
+
+            if sess is not None and sess.state in ("solved", "gave_up", "rejected"):
+                is_active = bool(orch and sess.id in getattr(orch, "_active_workers", {}))
+                if not is_active:
+                    yield f"event: done\ndata: {json.dumps({'state': sess.state})}\n\n"
+                    return
+
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    item = await asyncio.wait_for(q.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield "event: heartbeat\ndata: {}\n\n"
+                    continue
+                yield _format_sse(item)
+                sent += 1
+                if max_events is not None and sent >= max_events:
+                    break
+        finally:
+            unsub()
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/challenges/{challenge_id}/agent/start")

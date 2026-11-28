@@ -6,11 +6,12 @@ def test_load_seed_models():
     assert "nvidia" in cfg.providers
     assert cfg.providers["nvidia"].base_url == "https://integrate.api.nvidia.com/v1"
     assert cfg.providers["nvidia"].env_var == "NVIDIA_API_KEY"
-    assert cfg.roles["strong"].provider == "nvidia"
-    assert cfg.roles["strong"].name == "nvidia/nemotron-3-ultra-550b-a55b"
-    assert cfg.roles["fast"].name == "nvidia/nemotron-3.5-super-vl-120b-a12b"
-    assert cfg.fallbacks["strong"] == [cfg.roles["fast"]]
-    assert cfg.fallbacks["fast"] == [cfg.roles["strong"]]
+    assert cfg.roles["strong"].provider == "cli_agy"
+    assert cfg.roles["strong"].name == "gemini-4-neon-xhigh"
+    assert cfg.roles["fast"].provider == "cli_codex"
+    assert cfg.roles["fast"].name == "gpt-6.1-sol"
+    assert cfg.fallbacks["strong"][0] == cfg.roles["fast"]
+    assert cfg.fallbacks["fast"][0] == cfg.roles["strong"]
 
 
 def test_load_custom_models_path(tmp_path):

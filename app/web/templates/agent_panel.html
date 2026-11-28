@@ -40,7 +40,7 @@
   <div>
     <section id="agent-feed"
              hx-get="/challenges/{{ challenge.id }}/agent/feed{{ sid_qs }}"
-             hx-trigger="every 1.5s" hx-swap="innerHTML">
+             hx-trigger="every 1.5s [!window.__kothSseConnected]" hx-swap="innerHTML">
       {% include "_agent_feed.html" %}
     </section>
     <details class="card" style="margin-top:0.25rem;">
@@ -55,7 +55,7 @@
   <aside class="agent-side">
     <div id="agent-side"
          hx-get="/challenges/{{ challenge.id }}/agent/side{{ sid_qs }}"
-         hx-trigger="every 1.5s [!document.querySelector('#agent-side .checkpoint') && !document.querySelector('#agent-side .resume-panel') && (!document.activeElement || !document.activeElement.closest('#agent-side'))]"
+         hx-trigger="every 1.5s [!window.__kothSseConnected && !document.querySelector('#agent-side .checkpoint') && !document.querySelector('#agent-side .resume-panel') && (!document.activeElement || !document.activeElement.closest('#agent-side'))]"
          hx-swap="innerHTML">
       {% with challenge_id = challenge.id %}{% include "_agent_side.html" %}{% endwith %}
     </div>
@@ -97,5 +97,70 @@ document.addEventListener('htmx:responseError', function (evt) {
     window.kothToast('err', 'Ação não concluída', msg);
   }
 });
+
+(function () {
+  window.__kothSseConnected = false;
+  if (typeof EventSource === 'undefined') return;
+  var streamUrl = '/challenges/{{ challenge.id }}/agent/stream{{ sid_qs }}';
+  var es = new EventSource(streamUrl);
+  es.onopen = function () {
+    window.__kothSseConnected = true;
+    var b = document.getElementById('koth-sse-badge');
+    if (b) b.textContent = 'SSE ao vivo';
+  };
+  es.onerror = function () {
+    window.__kothSseConnected = false;
+    var b = document.getElementById('koth-sse-badge');
+    if (b) b.textContent = 'polling';
+  };
+  es.addEventListener('live_event', function (evt) {
+    try {
+      var ev = JSON.parse(evt.data);
+      var card = document.getElementById('koth-live-card');
+      if (card) card.style.display = 'flex';
+      var list = document.getElementById('koth-live-list');
+      if (!list) return;
+      var li = document.createElement('li');
+      var tsSpan = document.createElement('span');
+      tsSpan.style.color = 'var(--muted)';
+      tsSpan.textContent = '[' + (ev.ts || '') + '] ';
+      var strong = document.createElement('strong');
+      strong.textContent = ev.kind || 'evento';
+      li.appendChild(tsSpan);
+      li.appendChild(strong);
+      li.appendChild(document.createTextNode(': ' + (ev.detail || '')));
+      list.insertBefore(li, list.firstChild);
+      while (list.children.length > 8) list.removeChild(list.lastChild);
+    } catch (_e) {}
+  });
+  es.addEventListener('stdout_chunk', function (evt) {
+    try {
+      var data = JSON.parse(evt.data);
+      var wrap = document.getElementById('koth-live-console-wrap');
+      var pre = document.getElementById('koth-live-console');
+      if (!pre || !wrap) return;
+      wrap.style.display = 'block';
+      var prefix = data.branch ? ('[' + data.branch + '] ') : '';
+      pre.textContent += prefix + (data.text || '') + '\n';
+      if (pre.textContent.length > 8192) {
+        pre.textContent = pre.textContent.slice(-8192);
+      }
+      pre.scrollTop = pre.scrollHeight;
+    } catch (_e) {}
+  });
+  es.addEventListener('state_change', function () {
+    if (window.htmx) {
+      window.htmx.ajax('GET', '/challenges/{{ challenge.id }}/agent/feed{{ sid_qs }}', {target: '#agent-feed', swap: 'innerHTML'});
+      var ae = document.activeElement;
+      if (!ae || !ae.closest('#agent-side')) {
+        window.htmx.ajax('GET', '/challenges/{{ challenge.id }}/agent/side{{ sid_qs }}', {target: '#agent-side', swap: 'innerHTML'});
+      }
+    }
+  });
+  es.addEventListener('done', function () {
+    window.__kothSseConnected = false;
+    es.close();
+  });
+})();
 </script>
 {% endblock %}

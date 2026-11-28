@@ -16,16 +16,21 @@
       {{ sess.state|state_label }}
     </span>
   </h3>
-  {% if sess.state == "running" and sess.live_events %}
-  <div class="koth-alert warn live-activity" style="margin-bottom:0.85rem; flex-direction:column; gap:0.35rem;">
-    <strong style="font-size:0.78rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--warning);">
-      Atividade ao vivo
+  {% if sess.state == "running" or sess.live_events %}
+  <div id="koth-live-card" class="koth-alert warn live-activity" style="margin-bottom:0.85rem; flex-direction:column; gap:0.35rem; {% if sess.state != 'running' and not sess.live_events %}display:none;{% endif %}">
+    <strong style="font-size:0.78rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--warning); display:flex; justify-content:space-between; width:100%;">
+      <span>Atividade ao vivo</span>
+      <span id="koth-sse-badge" class="mono" style="font-size:0.7rem; color:var(--muted);">SSE</span>
     </strong>
-    <ul style="margin:0; padding-left:1.1rem; font-size:0.78rem;" class="mono">
-      {% for ev in sess.live_events[-6:]|reverse %}
+    <ul id="koth-live-list" style="margin:0; padding-left:1.1rem; font-size:0.78rem;" class="mono">
+      {% for ev in (sess.live_events[-6:] if sess.live_events else [])|reverse %}
       <li><span style="color:var(--muted);">[{{ ev.ts }}]</span> <strong>{{ ev.kind }}</strong>: {{ ev.detail }}</li>
       {% endfor %}
     </ul>
+    <details id="koth-live-console-wrap" style="width:100%; display:none; margin-top:0.25rem;">
+      <summary class="mono" style="cursor:pointer; font-size:0.74rem; color:var(--muted);">Saída em tempo real (stdout)</summary>
+      <pre id="koth-live-console" class="mono" style="margin:0.3rem 0 0; max-height:160px; overflow:auto; font-size:0.74rem; white-space:pre-wrap; background:var(--input-bg); padding:0.45rem; border-radius:4px;"></pre>
+    </details>
   </div>
   {% endif %}
   {% if sess.pending_decision %}
@@ -136,6 +141,7 @@
         <summary style="cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:0.5rem; list-style:none;">
           <span style="font-weight:600; font-size:0.88rem;">
             Ciclo {{ loop.index }} — especialista
+            {% if rep.branch %}<span class="badge neutral mono" style="margin-left:0.35rem;">{{ rep.branch }}</span>{% endif %}
             {% if rep.tools_used %}<small class="mono" style="color:var(--muted); font-weight:400;">· {{ rep.tools_used|join(", ") }}</small>{% endif %}
           </span>
           <span class="badge {{ 'flag-ok' if rep.status == 'SOLVED' else ('warn' if rep.status == 'NEED_HINT' else 'err') }} mono">

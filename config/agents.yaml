@@ -22,16 +22,16 @@ roles:
     model: fast
   specialist_crypto:
     persona: personas/specialist_crypto.md
-    model: fast
+    model: strong
   specialist_reversing:
     persona: personas/specialist_reversing.md
-    model: fast
+    model: strong
   specialist_forensics:
     persona: personas/specialist_forensics.md
-    model: fast
+    model: strong
   specialist_osint:
     persona: personas/specialist_osint.md
-    model: fast
+    model: strong
   specialist_misc:
     persona: personas/specialist_misc.md
     model: fast
@@ -40,3 +40,5 @@ limits:
   max_attempts: 20
   max_minutes: 90
   max_dispatch_tokens: 350000
+  allow_parallel_racing: true
+  max_race_branches: 2

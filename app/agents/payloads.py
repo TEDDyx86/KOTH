@@ -62,12 +62,14 @@ class SpecialistReport(BaseModel):
     dead_ends: list[str] = []
     next_step: str | None = None
     tools_used: list[str] = []
+    branch: str | None = None
 
 
 class JuryDecision(BaseModel):
     """Júri decision after each cycle."""
     action: Literal["DISPATCH", "RECHECK", "SUBMIT", "GIVE_UP", "WAIT_USER"]
     order: TaskOrder | None = None
+    parallel_orders: list[TaskOrder] = []
     flag_candidate: str | None = None
     reason: str
     findings: list[str] = []
@@ -76,8 +78,13 @@ class JuryDecision(BaseModel):
 
     @model_validator(mode="after")
     def _dispatch_needs_order(self) -> "JuryDecision":
-        if self.action == "DISPATCH" and self.order is None:
-            raise ValueError("DISPATCH requires an order")
+        if self.parallel_orders:
+            self.parallel_orders = list(self.parallel_orders[:2])
+        if self.action == "DISPATCH":
+            if self.order is None and not self.parallel_orders:
+                raise ValueError("DISPATCH requires an order or parallel_orders")
+            if self.order is None and self.parallel_orders:
+                self.order = self.parallel_orders[0]
         return self
 
 

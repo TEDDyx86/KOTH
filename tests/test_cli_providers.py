@@ -28,11 +28,18 @@ def test_build_cli_commands_portable():
     assert build_cli_command("cli_gemini", "gemini", "gemini-2.5-pro") == [
         "gemini", "-p", " ", "-m", "gemini-2.5-pro",
     ]
-    cmd_agy = build_cli_command("cli_agy", "agy", "gemini-4-hydrogen-high")
+    cmd_agy = build_cli_command("cli_agy", "agy", "gemini-4-neon-xhigh")
     assert cmd_agy[:5] == ["agy", "--input-format", "stream-json", "--output-format", "stream-json"]
     assert "--disable-slash-commands" in cmd_agy
     assert "--settings" in cmd_agy
-    assert cmd_agy[-2:] == ["--model", "gemini-4-hydrogen-high"]
+    assert cmd_agy[-2:] == ["--model", "gemini-4-neon-xhigh"]
+
+    cmd_codex_sol = build_cli_command("cli_codex", "codex", "gpt-6.1-sol")
+    assert "-m" in cmd_codex_sol and "gpt-6.1-sol" in cmd_codex_sol
+
+    from app.agents.cli_providers import CLI_CATALOG_BY_NAME
+    assert CLI_CATALOG_BY_NAME["cli_agy"].strong_default == "gemini-4-neon-xhigh"
+    assert CLI_CATALOG_BY_NAME["cli_codex"].strong_default == "gpt-6.1-sol"
 
 
 def test_missing_cli_raises_provider_unavailable(monkeypatch):

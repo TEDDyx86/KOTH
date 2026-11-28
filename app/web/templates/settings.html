@@ -12,6 +12,7 @@
     {% elif saved == "removed" %}Credencial removida do ambiente local.
     {% elif saved == "imported" %}Chaves importadas de ~/.local/share/opencode/auth.json.
     {% elif saved == "models" %}Modelos do Orquestrador atualizados em config/models.yaml e aplicados imediatamente.
+    {% elif saved == "profile" %}Perfil de modelos aplicado em config/models.yaml + config/agents.yaml e orquestrador recarregado.
     {% elif saved == "sandbox" %}Modo do Sandbox atualizado em config/tools.yaml e aplicado ao runtime.
     {% elif saved == "mcp" %}Servidores MCP atualizados em config/mcp.yaml e aplicados aos especialistas.
     {% elif saved == "theme" %}Tema visual atualizado e aplicado a todo o sistema.
@@ -166,6 +167,68 @@ document.addEventListener('DOMContentLoaded', function () {
 
 <!-- TAB 2: MODELOS & IA -->
 <div id="tab-models" class="koth-tab-panel {% if active_tab == 'models' %}active{% endif %}">
+  <section class="card">
+    <div class="row-actions" style="justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+      <div>
+        <h2 style="margin-bottom:0.2rem;">Perfis de Modelos (Combos)</h2>
+        <p style="color:var(--muted); font-size:0.84rem; margin:0;">
+          Aplique combinações prontas de modelos e roteamento ideal por tarefa com 1 clique.
+        </p>
+      </div>
+      {% if active_profile %}
+        <span class="badge flag-ok mono">perfil ativo: {{ active_profile }}</span>
+      {% else %}
+        <span class="badge neutral mono">perfil: personalizado</span>
+      {% endif %}
+    </div>
+
+    <div style="display:grid; gap:0.65rem; margin-bottom:1rem;">
+      {% for prof in model_profiles %}
+      <div class="provider-row" style="{% if active_profile == prof.name %}border-color:var(--flag-ok);{% endif %}">
+        <div class="row-actions" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+          <div style="flex:1; min-width:260px;">
+            <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+              <strong>{{ prof.label }}</strong>
+              <code class="mono" style="font-size:0.76rem; color:var(--muted);">{{ prof.name }}</code>
+              {% if active_profile == prof.name %}<span class="badge flag-ok mono">ativo</span>{% endif %}
+            </div>
+            <p style="color:var(--muted); font-size:0.8rem; margin:0.25rem 0 0.35rem;">{{ prof.description }}</p>
+            <div class="mono" style="font-size:0.76rem; color:var(--text);">
+              <span>strong: <strong>{{ prof.strong[0] }}:{{ prof.strong[1] }}</strong></span>
+              <span style="color:var(--muted); margin:0 0.35rem;">·</span>
+              <span>fast: <strong>{{ prof.fast[0] }}:{{ prof.fast[1] }}</strong></span>
+            </div>
+          </div>
+          <form method="post" action="/settings/profiles/{{ prof.name }}/activate">
+            <button class="btn {% if active_profile == prof.name %}ghost{% endif %} btn-sm" type="submit">
+              {% if active_profile == prof.name %}Reaplicar perfil{% else %}Ativar perfil{% endif %}
+            </button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if role_routing_rows %}
+    <details {% if active_profile == 'combo' %}open{% endif %}>
+      <summary class="mono" style="cursor:pointer; font-size:0.84rem; font-weight:600;">
+        Roteamento por Tarefa (Ativo — {{ role_routing_rows|length }} papéis)
+      </summary>
+      <table class="list" style="font-size:0.8rem; margin-top:0.5rem;">
+        <tr><th>Papel / Categoria</th><th>Camada</th><th>Provedor</th><th>Modelo Ativo</th></tr>
+        {% for rr in role_routing_rows %}
+        <tr>
+          <td>{{ rr.label }}</td>
+          <td><span class="badge {{ 'warn' if rr.tier == 'strong' else 'neutral' }} mono">{{ rr.tier }}</span></td>
+          <td class="mono">{{ rr.provider }}</td>
+          <td class="mono"><strong>{{ rr.model_name }}</strong></td>
+        </tr>
+        {% endfor %}
+      </table>
+    </details>
+    {% endif %}
+  </section>
+
   <section class="card">
     <h2>Modelos do Orquestrador &amp; Especialistas</h2>
     <p style="color:var(--muted); font-size:0.84rem; margin-top:-0.3rem;">
@@ -332,7 +395,7 @@ document.addEventListener('DOMContentLoaded', function () {
 <div id="tab-runtime" class="koth-tab-panel {% if active_tab == 'runtime' %}active{% endif %}">
   <section class="card">
     <h2>Limites do Planner (PL) &amp; Parada</h2>
-    <form method="post" action="/settings/limits" class="form-grid" style="max-width:520px; align-items:end;">
+    <form method="post" action="/settings/limits" class="form-grid" style="max-width:620px; align-items:end;">
       <label style="font-size:0.82rem; color:var(--muted);">
         Máximo de dispatches (tentativas)
         <input name="max_attempts" type="number" min="1" value="{{ agents_cfg.limits.get('max_attempts', 12) }}" required>
@@ -340,6 +403,15 @@ document.addEventListener('DOMContentLoaded', function () {
       <label style="font-size:0.82rem; color:var(--muted);">
         Timeout máximo (minutos)
         <input name="max_minutes" type="number" min="1" value="{{ agents_cfg.limits.get('max_minutes', 60) }}" required>
+      </label>
+      <label style="font-size:0.82rem; color:var(--muted);">
+        Ramos paralelos (Racing)
+        <input name="max_race_branches" type="number" min="1" max="2" value="{{ agents_cfg.limits.get('max_race_branches', 2) }}">
+      </label>
+      <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.82rem; color:var(--text);">
+        <input type="hidden" name="allow_parallel_racing" value="0">
+        <input type="checkbox" name="allow_parallel_racing" value="1" {% if agents_cfg.limits.get('allow_parallel_racing', True) %}checked{% endif %} style="width:auto;">
+        <span>Permitir Multi-Specialist Racing</span>
       </label>
       <button class="btn" type="submit">Salvar limites</button>
     </form>

@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Benchmark &amp; Analytics — KOTH{% endblock %}
+{% block content %}
+<header class="dash-header">
+  <div class="dash-title-group">
+    <h1>Benchmark &amp; Analytics</h1>
+    <div class="dash-telemetry mono tabular">
+      <span><strong>{{ analytics.overview.solved_challenges }}/{{ analytics.overview.total_challenges }}</strong> resolvidos ({{ analytics.overview.solve_rate_pct }}%)</span>
+      <span class="dash-sep" aria-hidden="true">·</span>
+      <span><strong>{{ analytics.overview.total_sessions }}</strong> sessões</span>
+      <span class="dash-sep" aria-hidden="true">·</span>
+      <span><strong>${{ '%.4f'|format(analytics.overview.total_cost_usd) }}</strong> custo total</span>
+    </div>
+  </div>
+  <div class="row-actions">
+    <a class="btn ghost btn-sm" href="/api/analytics?format=json&event_id={{ filter_event_id }}&category={{ filter_category }}&days={{ filter_days }}">Exportar JSON</a>
+    <a class="btn ghost btn-sm" href="/api/analytics?format=csv&event_id={{ filter_event_id }}&category={{ filter_category }}&days={{ filter_days }}">Exportar CSV</a>
+  </div>
+</header>
+
+<section class="card">
+  <form method="get" action="/analytics" class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); align-items:end;">
+    <label style="font-size:0.82rem; color:var(--muted);">
+      Evento
+      <select name="event_id">
+        <option value="">Todos os eventos</option>
+        {% for ev in analytics.events %}
+          <option value="{{ ev.id }}" {% if filter_event_id|string == ev.id|string %}selected{% endif %}>{{ ev.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="font-size:0.82rem; color:var(--muted);">
+      Categoria
+      <select name="category">
+        <option value="">Todas as categorias</option>
+        {% for cat in filter_categories %}
+          <option value="{{ cat }}" {% if filter_category == cat %}selected{% endif %}>{{ cat }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="font-size:0.82rem; color:var(--muted);">
+      Período
+      <select name="days">
+        <option value="" {% if not filter_days %}selected{% endif %}>Todo o histórico</option>
+        <option value="7" {% if filter_days|string == '7' %}selected{% endif %}>Últimos 7 dias</option>
+        <option value="30" {% if filter_days|string == '30' %}selected{% endif %}>Últimos 30 dias</option>
+      </select>
+    </label>
+    <button type="submit" class="btn">Filtrar</button>
+  </form>
+</section>
+
+<div class="kpis" style="margin-bottom:1rem;">
+  <div class="card kpi">
+    <span class="mono" style="font-size:0.76rem; color:var(--muted);">TAXA DE SOLVE</span>
+    <strong class="mono tabular" style="font-size:1.5rem;">{{ analytics.overview.solve_rate_pct }}%</strong>
+    <small class="mono" style="color:var(--muted);">{{ analytics.overview.solved_challenges }} de {{ analytics.overview.total_challenges }} desafios</small>
+  </div>
+  <div class="card kpi">
+    <span class="mono" style="font-size:0.76rem; color:var(--muted);">TOKENS TOTAIS</span>
+    <strong class="mono tabular" style="font-size:1.5rem;">{{ analytics.overview.total_tokens }}</strong>
+    <small class="mono" style="color:var(--muted);">in={{ analytics.overview.total_input_tokens }} · out={{ analytics.overview.total_output_tokens }}</small>
+  </div>
+  <div class="card kpi">
+    <span class="mono" style="font-size:0.76rem; color:var(--muted);">CUSTO POR SOLVE</span>
+    <strong class="mono tabular" style="font-size:1.5rem;">${{ '%.4f'|format(analytics.overview.avg_cost_per_solve_usd) }}</strong>
+    <small class="mono" style="color:var(--muted);">total ${{ '%.4f'|format(analytics.overview.total_cost_usd) }}</small>
+  </div>
+  <div class="card kpi">
+    <span class="mono" style="font-size:0.76rem; color:var(--muted);">TEMPO MÉDIO SOLVE</span>
+    <strong class="mono tabular" style="font-size:1.5rem;">{% if analytics.overview.avg_solve_minutes is not none %}{{ analytics.overview.avg_solve_minutes }} min{% else %}—{% endif %}</strong>
+    <small class="mono" style="color:var(--muted);">{{ analytics.overview.total_sessions }} sessões avaliadas</small>
+  </div>
+</div>
+
+<section class="card">
+  <h2>Ranking por Modelo</h2>
+  {% if analytics.by_model %}
+  <table class="list" style="font-size:0.84rem;">
+    <tr>
+      <th>Modelo</th>
+      <th>Chamadas (J/E)</th>
+      <th>Solve %</th>
+      <th>Tokens (In/Out)</th>
+      <th>Latência</th>
+      <th>Custo Total</th>
+      <th>Custo/Solve</th>
+    </tr>
+    {% for m in analytics.by_model %}
+    <tr>
+      <td class="mono"><strong>{{ m.model }}</strong></td>
+      <td class="mono tabular">{{ m.calls }} <span style="color:var(--muted);">({{ m.jury_calls }}/{{ m.specialist_calls }})</span></td>
+      <td style="min-width:130px;">
+        <div style="display:flex; align-items:center; gap:0.45rem;">
+          <div style="flex:1; height:6px; background:var(--input-bg); border-radius:3px; overflow:hidden;">
+            <div style="width:{{ m.solve_rate_pct }}%; height:100%; background:var(--accent);"></div>
+          </div>
+          <span class="mono tabular">{{ m.solve_rate_pct }}%</span>
+        </div>
+      </td>
+      <td class="mono tabular">{{ m.input_tokens }}/{{ m.output_tokens }}</td>
+      <td class="mono tabular">{{ m.avg_duration_s }}s</td>
+      <td class="mono tabular">${{ '%.4f'|format(m.total_cost_usd) }}</td>
+      <td class="mono tabular">{% if m.cost_per_solve_usd is not none %}${{ '%.4f'|format(m.cost_per_solve_usd) }}{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="koth-empty"><strong>Sem dados de telemetria ainda</strong><p style="color:var(--muted);">Execute sessões de agente para alimentar o ranking de modelos.</p></div>
+  {% endif %}
+</section>
+
+<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:1rem;">
+  <section class="card">
+    <h2>Performance por Categoria</h2>
+    {% if analytics.by_category %}
+    <table class="list" style="font-size:0.84rem;">
+      <tr><th>Categoria</th><th>Solve</th><th>Taxa</th><th>Ciclos méd.</th><th>Tempo méd.</th><th>Custo méd.</th></tr>
+      {% for c in analytics.by_category %}
+      <tr>
+        <td><span class="badge">{{ c.category }}</span></td>
+        <td class="mono tabular">{{ c.solved }}/{{ c.total }}</td>
+        <td class="mono tabular">{{ c.solve_rate_pct }}%</td>
+        <td class="mono tabular">{{ c.avg_cycles }}</td>
+        <td class="mono tabular">{% if c.avg_solve_minutes is not none %}{{ c.avg_solve_minutes }}m{% else %}—{% endif %}</td>
+        <td class="mono tabular">${{ '%.4f'|format(c.avg_cost_usd) }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="mono" style="color:var(--muted);">Nenhuma categoria registrada.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Duplas (Júri × Especialista)</h2>
+    {% if analytics.by_pair %}
+    <table class="list" style="font-size:0.84rem;">
+      <tr><th>Dupla</th><th>Sessões</th><th>Solve %</th><th>Custo Total</th><th>Custo/Solve</th></tr>
+      {% for p in analytics.by_pair %}
+      <tr>
+        <td class="mono">{{ p.pair }}</td>
+        <td class="mono tabular">{{ p.solved }}/{{ p.sessions }}</td>
+        <td class="mono tabular">{{ p.solve_rate_pct }}%</td>
+        <td class="mono tabular">${{ '%.4f'|format(p.total_cost_usd) }}</td>
+        <td class="mono tabular">{% if p.cost_per_solve_usd is not none %}${{ '%.4f'|format(p.cost_per_solve_usd) }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="mono" style="color:var(--muted);">Sem pares registrados ainda.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

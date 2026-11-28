@@ -11,17 +11,19 @@ providers:
     env_var: OPENAI_API_KEY
   cli_agy:
     mode: cli
+  cli_codex:
+    mode: cli
 roles:
   strong:
-    provider: nvidia
-    name: nvidia/nemotron-3-ultra-550b-a55b
+    provider: cli_agy
+    name: gemini-4-neon-xhigh
   fast:
-    provider: nvidia
-    name: nvidia/nemotron-3.5-super-vl-120b-a12b
+    provider: cli_agy
+    name: gemini-4-neon-xhigh
 fallbacks:
   strong:
-  - provider: nvidia
-    name: nvidia/nemotron-3.5-super-vl-120b-a12b
+  - provider: cli_codex
+    name: gpt-6.1-sol
   fast:
-  - provider: nvidia
-    name: nvidia/nemotron-3-ultra-550b-a55b
+  - provider: cli_agy
+    name: gemini-4-neon-xhigh
